@@ -5,7 +5,7 @@ const FLOW_ID_KEY = 'api_harness_flowid'
 
 export interface StoredSession {
   session_id: string
-  session_token: string
+  api_key: string
   flow_id: string
   expires_at: string
 }

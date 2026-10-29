@@ -40,7 +40,7 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
     clearTimeout(idleTimer.current)
     const sess = storage.getSession()
     if (sess) {
-      try { await api.deleteSession(sess.session_id, sess.session_token) } catch { /* best-effort */ }
+      try { await api.deleteSession(sess.session_id, sess.api_key) } catch { /* best-effort */ }
       storage.clearSession()
     }
     setNodes([])
@@ -92,7 +92,7 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
     ;(async () => {
       setScreen('loading')
       try {
-        const envelope = await api.getSession(sess.session_id, sess.session_token)
+        const envelope = await api.getSession(sess.session_id, sess.api_key)
         setNodes(envelope.nodes)
         setScreen('flow')
       } catch (err: unknown) {
@@ -119,11 +119,9 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
     setScreen('loading')
     try {
       const envelope = await api.startFlow(flowId, apiKey)
-      // get a session token for subsequent calls
-      const tokenEnvelope = await api.getSessionToken(envelope.session_id, apiKey)
       storage.setSession({
         session_id: envelope.session_id,
-        session_token: tokenEnvelope.session_token,
+        api_key: apiKey,
         flow_id: flowId,
         expires_at: envelope.expires_at,
       })
@@ -168,13 +166,13 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
     try {
       let envelope
       if (answer.type === 'file') {
-        envelope = await api.uploadFile(sess.session_id, sess.session_token, answer.file, key)
+        envelope = await api.uploadFile(sess.session_id, sess.api_key, answer.file, key)
       } else {
         const input =
           answer.type === 'option'
             ? { type: 'option' as const, option_id: answer.option_id }
             : { type: 'text' as const, value: answer.value }
-        envelope = await api.sendMessage(sess.session_id, sess.session_token, input, key)
+        envelope = await api.sendMessage(sess.session_id, sess.api_key, input, key)
       }
 
       setNodes(envelope.nodes)
@@ -251,11 +249,14 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
       <div className="kiosk-content">
         {screen === 'welcome' && (
           <div className="welcome-screen">
-            <h1>Welcome</h1>
-            <p className="welcome-subtitle">Touch the button below to begin</p>
-            <button className="start-btn" onClick={startFlow}>
-              Start Check-in
-            </button>
+            <div className="welcome-card">
+              <div className="welcome-icon">👋</div>
+              <h1>Welcome</h1>
+              <p className="welcome-subtitle">Touch the button below to begin your check-in</p>
+              <button className="start-btn" onClick={startFlow}>
+                Start Check-in
+              </button>
+            </div>
           </div>
         )}
 
