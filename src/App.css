@@ -1,56 +1,247 @@
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: system-ui, sans-serif; background: #f5f5f5; color: #111; }
-.app { display: flex; flex-direction: column; min-height: 100vh; }
+/* ── App shell ──────────────────────────────────────────────────────────────── */
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100svh;
+  background: #FAF8F5;  /* warm beige instead of cold gray */
+}
 
+/* ── Header / Banner ────────────────────────────────────────────────────────── */
 .banner {
-  background: #1a1a2e; color: #fff; padding: 10px 20px;
-  display: flex; align-items: center; justify-content: space-between;
-  font-size: 13px; letter-spacing: 0.5px;
+  background: #1C1917;   /* warm charcoal, matches kiosk --k-text */
+  padding: 0 24px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  box-shadow: 0 1px 0 rgba(255,255,255,.04);
+  z-index: 100;
+  position: relative;
 }
-.banner-env { font-weight: 700; color: #ffd700; }
-.banner nav { display: flex; gap: 8px; }
+
+.banner-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.banner-logo {
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(145deg, #5A8C6B, #7BAE8B);  /* sage green */
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.banner-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #E7E2DB;   /* --k-border warm off-white */
+  letter-spacing: -0.01em;
+}
+
+.banner-env {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.1);
+  color: #A8A29E;   /* warm muted, matches --k-text-faint */
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: var(--cf-radius-full);
+}
+
+.banner-env::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #7BAE8B;   /* sage green, matches --k-accent */
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .4; }
+}
+
+/* ── Tab nav ────────────────────────────────────────────────────────────────── */
+.banner nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255,255,255,.04);
+  padding: 4px;
+  border-radius: var(--cf-radius);
+  border: 1px solid rgba(200,191,176,.12);   /* warm border */
+}
+
 .banner nav button {
-  background: transparent; border: 1px solid #555; color: #ccc;
-  padding: 6px 16px; border-radius: 4px; cursor: pointer; font-size: 13px;
+  background: transparent;
+  border: none;
+  color: #78716C;   /* --k-text-dim warm */
+  padding: 4px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: color var(--cf-transition-fast), background var(--cf-transition-fast);
+  letter-spacing: 0.01em;
 }
-.banner nav button.active { background: #fff; color: #1a1a2e; font-weight: 700; border-color: #fff; }
 
-main { flex: 1; display: flex; overflow: hidden; }
+.banner nav button:hover:not(.active) {
+  color: #C8BFB0;   /* --k-stone */
+  background: rgba(255,255,255,.06);
+}
 
-/* shared button */
-button { cursor: pointer; }
+.banner nav button.active {
+  background: rgba(123,174,139,.18);   /* sage green tint */
+  color: #7BAE8B;
+  font-weight: 600;
+}
+
+/* ── Main content area ──────────────────────────────────────────────────────── */
+main {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ── Shared form controls ───────────────────────────────────────────────────── */
+input[type="text"],
+input[type="number"],
+input[type="email"],
+input[type="password"],
+textarea,
+select {
+  display: block;
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--cf-border);
+  border-radius: var(--cf-radius-sm);
+  font-size: 14px;
+  font-family: var(--cf-font);
+  color: var(--cf-text-primary);
+  background: var(--cf-surface);
+  outline: none;
+  transition: border-color var(--cf-transition-fast), box-shadow var(--cf-transition-fast);
+  line-height: 1.5;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--cf-primary);
+  box-shadow: 0 0 0 3px rgba(30,64,175,.1);
+}
+
+input::placeholder { color: var(--cf-text-muted); }
+
+label {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--cf-text-muted);
+  margin-bottom: 5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ── Shared button ──────────────────────────────────────────────────────────── */
 .btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  min-height: 56px; padding: 12px 24px; border-radius: 8px;
-  font-size: 18px; font-weight: 600; border: none; cursor: pointer;
-  transition: opacity 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--cf-radius-sm);
+  border: 1px solid var(--cf-border);
+  font-size: 12.5px;
+  font-weight: 500;
+  font-family: var(--cf-font);
+  cursor: pointer;
+  background: var(--cf-surface);
+  color: var(--cf-text-primary);
+  transition: all var(--cf-transition-fast);
+  white-space: nowrap;
+  line-height: 1;
+  letter-spacing: 0.01em;
 }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-primary { background: #2563eb; color: #fff; }
-.btn-danger { background: #dc2626; color: #fff; }
-.btn-secondary { background: #e5e7eb; color: #111; }
-.btn-sm { min-height: 36px; padding: 6px 14px; font-size: 14px; }
 
-.card {
-  background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-  padding: 24px;
+.btn:hover:not(:disabled) {
+  background: var(--cf-surface-2);
+  border-color: var(--cf-border-2);
 }
 
-input[type="text"], input[type="number"], input[type="password"], textarea, select {
-  width: 100%; padding: 10px 14px; border: 1.5px solid #d1d5db;
-  border-radius: 6px; font-size: 16px; outline: none;
+.btn:active:not(:disabled) { transform: translateY(0.5px); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.btn-primary {
+  background: #1e40af;
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 1px 3px rgba(30,64,175,.25), inset 0 1px 0 rgba(255,255,255,.1);
 }
-input:focus, textarea:focus, select:focus { border-color: #2563eb; }
 
-label { font-size: 14px; font-weight: 600; color: #374151; display: block; margin-bottom: 4px; }
-
-.error-msg { color: #dc2626; font-size: 14px; margin-top: 6px; }
-.success-msg { color: #16a34a; font-size: 14px; margin-top: 6px; }
-
-.badge {
-  display: inline-block; padding: 2px 8px; border-radius: 99px;
-  font-size: 12px; font-weight: 600;
+.btn-primary:hover:not(:disabled) {
+  background: #1d3a9e;
+  border-color: transparent;
+  box-shadow: 0 2px 6px rgba(30,64,175,.35), inset 0 1px 0 rgba(255,255,255,.1);
 }
-.badge-active { background: #dcfce7; color: #166534; }
-.badge-rotating { background: #fef9c3; color: #854d0e; }
-.badge-revoked { background: #fee2e2; color: #991b1b; }
+
+.btn-danger {
+  background: transparent;
+  color: #dc2626;
+  border-color: #fca5a5;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #f87171;
+}
+
+.btn-sm { padding: 4px 9px; font-size: 11.5px; }
+
+/* ── Status badges ──────────────────────────────────────────────────────────── */
+.badge-active {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 9px; border-radius: var(--cf-radius-full);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+  background: #f0fdf4; color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.badge-active::before {
+  content: ''; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--cf-success);
+}
+
+.badge-rotating {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 9px; border-radius: var(--cf-radius-full);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+  background: #fffbeb; color: #b45309;
+  border: 1px solid #fde68a;
+}
+
+.badge-revoked {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 9px; border-radius: var(--cf-radius-full);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+  background: #f8fafc; color: #94a3b8;
+  border: 1px solid #e2e8f0;
+}

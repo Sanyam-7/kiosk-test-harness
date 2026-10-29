@@ -6,30 +6,44 @@ import NodeRenderer, { type AnswerPayload } from './NodeRenderer'
 import './Kiosk.css'
 
 type Screen = 'welcome' | 'loading' | 'flow' | 'ended' | 'error'
+type HistoryItem = { role: 'bot' | 'user'; text: string }
 
-const IDLE_TIMEOUT_MS = 60_000
-const COUNTDOWN_START = 10
+const IDLE_TIMEOUT_MS  = 60_000
+const COUNTDOWN_START  = 10
+const ARC_CIRCUMFERENCE = 2 * Math.PI * 24  // r=24 on 56×56 SVG
 
+function answerText(a: AnswerPayload): string {
+  if (a.type === 'text')   return a.value
+  if (a.type === 'option') return a.label ?? '✓ Selected'
+  return '📷 Photo captured'
+}
 
 export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
-  const [screen, setScreen] = useState<Screen>('welcome')
-  const [nodes, setNodes] = useState<SessionNode[]>([])
-  const [errorMsg, setErrorMsg] = useState('')
-  const [countdown, setCountdown] = useState<number | null>(null)
+  const [screen, setScreen]             = useState<Screen>('welcome')
+  const [nodes, setNodes]               = useState<SessionNode[]>([])
+  const [errorMsg, setErrorMsg]         = useState('')
+  const [countdown, setCountdown]       = useState<number | null>(null)
   const [inspectorOpen, setInspectorOpen] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
+  const [submitting, setSubmitting]     = useState(false)
 
-  // idempotency key — one UUID per user action, reused on 409 retry
-  const idempotencyKey = useRef<string>('')
-  const retryCount = useRef(0)
-  const pendingAnswer = useRef<AnswerPayload | null>(null)
+  // typewriter + history
+  const [history, setHistory]             = useState<HistoryItem[]>([])
+  const [currentBotText, setCurrentBotText] = useState('')
+  const [typed, setTyped]                 = useState('')
+  const [typewriterDone, setTypewriterDone] = useState(true)
+  const [pendingFinal, setPendingFinal]   = useState(false)
 
-  const idleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const countdownInterval = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
-  const endResetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const countdownRef = useRef(0)
+  const processedNodeIds = useRef(new Set<string>())
+  const historyEndRef    = useRef<HTMLDivElement>(null)
+  const idempotencyKey   = useRef('')
+  const pendingAnswer    = useRef<AnswerPayload | null>(null)
 
-  // ── idle timer ───────────────────────────────────────────────────────────
+  const idleTimer           = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const countdownInterval   = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
+  const endResetTimer       = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
+  const countdownRef        = useRef(0)
+
+  // ── Idle timer ───────────────────────────────────────────────────────────
   const clearCountdown = useCallback(() => {
     clearInterval(countdownInterval.current)
     setCountdown(null)
@@ -43,7 +57,13 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
       try { await api.deleteSession(sess.session_id, sess.api_key) } catch { /* best-effort */ }
       storage.clearSession()
     }
+    processedNodeIds.current = new Set()
     setNodes([])
+    setHistory([])
+    setCurrentBotText('')
+    setTyped('')
+    setTypewriterDone(true)
+    setPendingFinal(false)
     setScreen('welcome')
   }, [clearCountdown])
 
@@ -66,7 +86,6 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
     idleTimer.current = setTimeout(startCountdown, IDLE_TIMEOUT_MS - COUNTDOWN_START * 1_000)
   }, [clearCountdown, startCountdown])
 
-  // Attach global activity listeners when in 'flow'
   useEffect(() => {
     if (screen !== 'flow') {
       clearTimeout(idleTimer.current)
@@ -84,60 +103,51 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
     }
   }, [screen, resetIdleTimer, clearCountdown])
 
-  // ── on mount: check for existing session ─────────────────────────────────
+  // ── Detect new bot messages when nodes change ────────────────────────────
   useEffect(() => {
-    const sess = storage.getSession()
-    if (!sess) return
+    const newNodes = nodes.filter(n => !processedNodeIds.current.has(n.node_id))
+    if (!newNodes.length) return
+    newNodes.forEach(n => processedNodeIds.current.add(n.node_id))
+    const botText = newNodes
+      .flatMap(n => n.messages.map(m => m.text))
+      .filter(Boolean)
+      .join(' ')
+    if (botText) setCurrentBotText(botText)
+    else setTypewriterDone(true)
+  }, [nodes])
 
-    ;(async () => {
-      setScreen('loading')
-      try {
-        const envelope = await api.getSession(sess.session_id, sess.api_key)
-        setNodes(envelope.nodes)
-        setScreen('flow')
-      } catch (err: unknown) {
-        storage.clearSession()
-        const code = (err as { error_code?: string }).error_code
-        if (code !== 'session_expired') {
-          // non-expiry errors: still fall back to welcome silently
-        }
-        setScreen('welcome')
+  // ── Typewriter + TTS ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!currentBotText) return
+    setTyped('')
+    setTypewriterDone(false)
+
+    window.speechSynthesis?.cancel()
+    const utt = new SpeechSynthesisUtterance(currentBotText)
+    window.speechSynthesis?.speak(utt)
+
+    let i = 0
+    const timer = setInterval(() => {
+      i++
+      setTyped(currentBotText.slice(0, i))
+      if (i >= currentBotText.length) {
+        clearInterval(timer)
+        setTypewriterDone(true)
       }
-    })()
-  }, [])
+    }, 38)
 
-  // ── start flow ───────────────────────────────────────────────────────────
-  const startFlow = useCallback(async () => {
-    const apiKey = storage.getApiKey()
-    const flowId = storage.getFlowId()
-    if (!apiKey || !flowId) {
-      setErrorMsg('Missing API key or flow ID. Configure them in settings.')
-      setScreen('error')
-      return
+    return () => {
+      clearInterval(timer)
+      window.speechSynthesis?.cancel()
     }
+  }, [currentBotText])
 
-    setScreen('loading')
-    try {
-      const envelope = await api.startFlow(flowId, apiKey)
-      storage.setSession({
-        session_id: envelope.session_id,
-        api_key: apiKey,
-        flow_id: flowId,
-        expires_at: envelope.expires_at,
-      })
-      setNodes(envelope.nodes)
-      if (envelope.is_final) {
-        triggerEnded()
-      } else {
-        setScreen('flow')
-      }
-    } catch (err: unknown) {
-      setErrorMsg(extractMessage(err))
-      setScreen('error')
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // ── Scroll history to bottom ─────────────────────────────────────────────
+  useEffect(() => {
+    historyEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [history])
 
-  // ── ended state ──────────────────────────────────────────────────────────
+  // ── Trigger end after typewriter finishes ────────────────────────────────
   const triggerEnded = useCallback(() => {
     setScreen('ended')
     let n = COUNTDOWN_START
@@ -148,7 +158,11 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
       if (n <= 0) {
         clearInterval(endResetTimer.current)
         storage.clearSession()
+        processedNodeIds.current = new Set()
         setNodes([])
+        setHistory([])
+        setCurrentBotText('')
+        setTyped('')
         setCountdown(null)
         setScreen('welcome')
       }
@@ -157,7 +171,66 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
 
   useEffect(() => () => clearInterval(endResetTimer.current), [])
 
-  // ── send answer ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (typewriterDone && pendingFinal) {
+      setPendingFinal(false)
+      triggerEnded()
+    }
+  }, [typewriterDone, pendingFinal, triggerEnded])
+
+  // ── On mount: restore session ────────────────────────────────────────────
+  useEffect(() => {
+    const sess = storage.getSession()
+    if (!sess) return
+    ;(async () => {
+      setScreen('loading')
+      try {
+        const envelope = await api.getSession(sess.session_id, sess.api_key)
+        setNodes(envelope.nodes)
+        setScreen('flow')
+      } catch (err: unknown) {
+        storage.clearSession()
+        const code = (err as { error_code?: string }).error_code
+        if (code !== 'session_expired') { /* fall through */ }
+        setScreen('welcome')
+      }
+    })()
+  }, [])
+
+  // ── Start flow ───────────────────────────────────────────────────────────
+  const startFlow = useCallback(async () => {
+    const apiKey = storage.getApiKey()
+    const flowId = storage.getFlowId()
+    if (!apiKey || !flowId) {
+      setErrorMsg('Missing API key or flow ID. Configure them in the Admin panel.')
+      setScreen('error')
+      return
+    }
+    setScreen('loading')
+    processedNodeIds.current = new Set()
+    setHistory([])
+    setCurrentBotText('')
+    setTyped('')
+    setTypewriterDone(true)
+    setPendingFinal(false)
+    try {
+      const envelope = await api.startFlow(flowId, apiKey)
+      storage.setSession({
+        session_id: envelope.session_id,
+        api_key: apiKey,
+        flow_id: flowId,
+        expires_at: envelope.expires_at,
+      })
+      setNodes(envelope.nodes)
+      setScreen('flow')
+      if (envelope.is_final) setPendingFinal(true)
+    } catch (err: unknown) {
+      setErrorMsg(extractMessage(err))
+      setScreen('error')
+    }
+  }, [])
+
+  // ── Send answer ──────────────────────────────────────────────────────────
   const sendAnswer = useCallback(async (answer: AnswerPayload, key: string, retry = 0) => {
     const sess = storage.getSession()
     if (!sess) { setScreen('welcome'); return }
@@ -176,54 +249,61 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
       }
 
       setNodes(envelope.nodes)
-      if (envelope.is_final) {
-        triggerEnded()
-      }
+      if (envelope.is_final) setPendingFinal(true)
     } catch (err: unknown) {
-      const code = (err as { error_code?: string }).error_code
+      const code   = (err as { error_code?: string }).error_code
       const status = (err as { status?: number }).status
 
       if ((status === 409 || code === 'duplicate_request') && retry < 2) {
-        // same key, retry after 500ms
         setTimeout(() => sendAnswer(answer, key, retry + 1), 500)
         return
       }
-
       if (code === 'invalid_option_id') {
-        // 422 invalid option — shouldn't happen; prompt restart
-        setErrorMsg("This shouldn't happen — please restart.")
+        setErrorMsg("Invalid option — please restart.")
         setScreen('error')
         return
       }
-
       if (code === 'session_expired' || status === 404) {
         storage.clearSession()
         setScreen('welcome')
         return
       }
-
       setErrorMsg(extractMessage(err))
       setScreen('error')
     } finally {
       setSubmitting(false)
     }
-  }, [triggerEnded])
+  }, [])
 
   const onAnswer = useCallback((answer: AnswerPayload) => {
-    // New user action → new idempotency key
+    // push current bot message + user answer to history
+    if (currentBotText) {
+      setHistory(h => [...h, { role: 'bot', text: currentBotText }])
+    }
+    setHistory(h => [...h, { role: 'user', text: answerText(answer) }])
+    setCurrentBotText('')
+    setTyped('')
+    setTypewriterDone(false)
+
     idempotencyKey.current = crypto.randomUUID()
-    retryCount.current = 0
     pendingAnswer.current = answer
     sendAnswer(answer, idempotencyKey.current)
-  }, [sendAnswer])
+  }, [currentBotText, sendAnswer])
 
-  // ── inspector log helpers ─────────────────────────────────────────────────
+  // ── Active input node ────────────────────────────────────────────────────
+  const activeInputNode = nodes
+    .slice()
+    .reverse()
+    .find(n => ['question_text', 'question_options', 'question_capture'].includes(n.type)) ?? null
+
+  const isIdle = countdown !== null && screen === 'flow'
+
+  // ── Inspector helpers ────────────────────────────────────────────────────
   const statusClass = (status: number | null) => {
     if (!status) return 'status-pending'
     if (status >= 500) return 'status-5xx'
     if (status >= 400) return 'status-4xx'
-    if (status >= 200) return 'status-2xx'
-    return ''
+    return 'status-2xx'
   }
 
   const truncate = (v: unknown) => {
@@ -232,88 +312,134 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
     return s.length > 300 ? s.slice(0, 300) + '…' : s
   }
 
-  // ── render ────────────────────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="kiosk-screen" role="main">
-      {/* Inspector toggle */}
+    <div className={`kiosk-screen${isIdle ? ' is-idle' : ''}`} role="main">
+
+      {/* progress bar */}
+      {(screen === 'loading' || submitting) && <div className="kiosk-progress" />}
+
+      {/* inspector toggle */}
       <button
         className="inspector-toggle"
         onClick={() => setInspectorOpen(o => !o)}
-        aria-label={inspectorOpen ? 'Close inspector' : 'Open inspector'}
-        aria-expanded={inspectorOpen}
+        aria-label={inspectorOpen ? 'Close logs' : 'Open logs'}
       >
         {inspectorOpen ? '✕ Logs' : '☰ Logs'}
       </button>
 
-      {/* Main content area */}
-      <div className="kiosk-content">
-        {screen === 'welcome' && (
-          <div className="welcome-screen">
-            <div className="welcome-card">
-              <div className="welcome-icon">👋</div>
-              <h1>Welcome</h1>
-              <p className="welcome-subtitle">Touch the button below to begin your check-in</p>
-              <button className="start-btn" onClick={startFlow}>
-                Start Check-in
-              </button>
+      {/* ── screens ── */}
+
+      {screen === 'welcome' && (
+        <div className="kiosk-welcome">
+          <div className="welcome-card">
+            <h1 className="welcome-headline">Hello.<br />Let's begin.</h1>
+            <p className="welcome-sub">Touch the button below to start your check-in.</p>
+            <button className="kiosk-begin-btn" onClick={startFlow}>
+              Begin
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M3 10a.75.75 0 0 1 .75-.75h10.638L10.23 5.29a.75.75 0 1 1 1.04-1.08l5.5 5.25a.75.75 0 0 1 0 1.08l-5.5 5.25a.75.75 0 1 1-1.04-1.08l4.158-3.96H3.75A.75.75 0 0 1 3 10Z" clipRule="evenodd" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {screen === 'loading' && (
+        <div className="kiosk-loading">
+          <div className="kiosk-dots">
+            <span /><span /><span />
+          </div>
+        </div>
+      )}
+
+      {screen === 'flow' && (
+        <div className="kiosk-flow">
+          {/* history */}
+          {history.length > 0 && (
+            <div className="kiosk-history">
+              {history.map((item, i) => (
+                <div key={i} className={`h-item h-${item.role}`}>{item.text}</div>
+              ))}
+              <div ref={historyEndRef} />
             </div>
-          </div>
-        )}
+          )}
 
-        {screen === 'loading' && (
-          <div className="loading-screen">
-            <div className="spinner" role="status" aria-label="Loading" />
-            <p>Loading…</p>
+          {/* typewriter stage */}
+          <div className="kiosk-stage">
+            {(currentBotText || typed) && (
+              <div className="typewriter-wrap">
+                <p className="typewriter-text">
+                  {typed || currentBotText.slice(0, 1)}
+                  {!typewriterDone && <span className="tw-cursor" aria-hidden="true" />}
+                </p>
+              </div>
+            )}
+            {submitting && !currentBotText && (
+              <div className="kiosk-dots">
+                <span /><span /><span />
+              </div>
+            )}
           </div>
-        )}
 
-        {screen === 'flow' && (
-          <div className="flow-screen">
+          {/* node input — shown when typewriter done */}
+          {typewriterDone && activeInputNode && (
             <NodeRenderer
-              nodes={nodes}
+              node={activeInputNode}
               onAnswer={onAnswer}
               disabled={submitting}
             />
-          </div>
-        )}
+          )}
+        </div>
+      )}
 
-        {screen === 'ended' && (
-          <div className="end-screen">
-            <div className="checkmark" aria-hidden="true">&#10003;</div>
-            <h2>Thank you!</h2>
-            <p>Your check-in is complete.</p>
-            {countdown !== null && (
-              <p className="end-countdown">Returning to start in {countdown}s…</p>
-            )}
-          </div>
-        )}
-
-        {screen === 'error' && (
-          <div className="error-screen">
-            <p className="error-message">{errorMsg}</p>
-            <div className="error-actions">
-              <button className="btn-primary" onClick={startFlow}>
-                Try Again
-              </button>
-              <button className="btn-secondary" onClick={resetToWelcome}>
-                Start Over
-              </button>
+      {screen === 'ended' && (
+        <div className="kiosk-end">
+          <svg className="end-check-svg" viewBox="0 0 52 52">
+            <circle className="end-check-circle" cx="26" cy="26" r="25" />
+            <path className="end-check-path" d="M14 27 L22 35 L38 17" />
+          </svg>
+          <p className="end-headline">Thank you!</p>
+          <p className="end-sub">Your check-in is complete.</p>
+          {countdown !== null && (
+            <div className="end-arc-wrap" aria-label={`Resetting in ${countdown}s`}>
+              <svg className="end-arc-svg" viewBox="0 0 56 56">
+                <circle className="end-arc-track" cx="28" cy="28" r="24" />
+                <circle
+                  className="end-arc-fill"
+                  cx="28" cy="28" r="24"
+                  strokeDasharray={ARC_CIRCUMFERENCE}
+                  strokeDashoffset={ARC_CIRCUMFERENCE * (1 - countdown / COUNTDOWN_START)}
+                />
+              </svg>
+              <span className="end-arc-num">{countdown}</span>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
-      {/* Idle warning banner */}
-      {countdown !== null && screen === 'flow' && (
-        <div className="idle-warning" role="alert">
-          Are you still there? Resetting in {countdown}s
-          <button onClick={resetIdleTimer} className="idle-cancel">
-            I&apos;m here
+      {screen === 'error' && (
+        <div className="kiosk-error">
+          <span className="error-icon" aria-hidden="true">⚠</span>
+          <p className="error-message">{errorMsg}</p>
+          <div className="k-error-actions">
+            <button className="k-primary-btn" onClick={startFlow}>Try Again</button>
+            <button className="k-ghost-btn"   onClick={resetToWelcome}>Start Over</button>
+          </div>
+        </div>
+      )}
+
+      {/* idle banner */}
+      {isIdle && (
+        <div className="kiosk-idle-banner" role="alert">
+          Still there? Resetting in {countdown}s
+          <button className="kiosk-idle-cancel" onClick={resetIdleTimer}>
+            I'm here
           </button>
         </div>
       )}
 
-      {/* Inspector drawer */}
+      {/* inspector drawer */}
       {inspectorOpen && (
         <aside className="inspector-drawer" aria-label="Request logs">
           <h2 className="inspector-title">Request Log</h2>
@@ -325,7 +451,7 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
                   {log.status ?? '…'}
                 </span>
                 <span className="log-method">{log.method}</span>
-                <span className="log-path">{log.path}</span>
+                <span className="log-path" title={log.path}>{log.path}</span>
                 {log.durationMs !== null && (
                   <span className="log-duration">{log.durationMs}ms</span>
                 )}
@@ -351,13 +477,6 @@ function extractMessage(err: unknown): string {
   if (err && typeof err === 'object') {
     const e = err as Record<string, unknown>
     if (typeof e.message === 'string') return e.message
-    if (e.response && typeof e.response === 'object') {
-      const r = e.response as Record<string, unknown>
-      if (r.data && typeof r.data === 'object') {
-        const d = r.data as Record<string, unknown>
-        if (typeof d.message === 'string') return d.message
-      }
-    }
   }
   return 'An unexpected error occurred. Please try again.'
 }
