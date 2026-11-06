@@ -117,18 +117,18 @@ export function deleteSession(sessionId: string, apiKey: string) {
   })
 }
 
-// ── Admin API (direct to conversation-flow-python, X-Account-Id only) ────────
+// ── Admin API (direct to conversation-flow-python, account apiKey auth) ───────
 
-export function listChannels(webId: string, flowId?: string) {
+export function listChannels(apiKey: string, flowId?: string) {
   const q = flowId ? `?flow_id=${flowId}` : ''
   return request<{ channels: ApiChannel[] }>('GET', `${ADMIN_API_BASE}/v2/guided-conv/admin/api-channels${q}`, {
-    accountId: webId,
+    auth: { type: 'apikey', key: apiKey },
   })
 }
 
-export function createChannel(webId: string, flowId: string) {
+export function createChannel(apiKey: string, flowId: string) {
   return request<ApiChannel>('POST', `${ADMIN_API_BASE}/v2/guided-conv/admin/api-channels`, {
-    accountId: webId,
+    auth: { type: 'apikey', key: apiKey },
     body: { flow_id: flowId },
   })
 }

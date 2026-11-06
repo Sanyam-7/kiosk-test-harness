@@ -7,7 +7,6 @@ import './Admin.css'
 // ── AdminPanel ────────────────────────────────────────────────────────────────
 
 export function AdminPanel() {
-  const [webId, setWebId] = useState(storage.getWebId)
   const [flowId, setFlowId] = useState(storage.getFlowId)
   const [apiKey, setApiKey] = useState(storage.getApiKey)
   const [showKey, setShowKey] = useState(false)
@@ -17,9 +16,9 @@ export function AdminPanel() {
   const [loadError, setLoadError] = useState('')
   const [channelError, setChannelError] = useState('')
 
-  function guardIds(): boolean {
-    if (!webId.trim() || !flowId.trim()) {
-      setLoadError('Web ID and Flow ID are required')
+  function guardFields(): boolean {
+    if (!apiKey.trim() || !flowId.trim()) {
+      setLoadError('Account API Key and Flow ID are required')
       return true
     }
     setLoadError('')
@@ -27,26 +26,26 @@ export function AdminPanel() {
   }
 
   const loadChannel = useCallback(async () => {
-    if (guardIds()) return
+    if (guardFields()) return
     try {
-      const res = await api.listChannels(webId, flowId)
+      const res = await api.listChannels(apiKey, flowId)
       setChannel(res.channels[0] ?? null)
     } catch (e: unknown) {
       setLoadError(e instanceof Error ? e.message : 'Failed to load channel')
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [webId, flowId])
+  }, [apiKey, flowId])
 
   useEffect(() => {
-    if (webId && flowId) loadChannel()
+    if (apiKey && flowId) loadChannel()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function handleCreateChannel() {
-    if (guardIds()) return
+    if (guardFields()) return
     setChannelError('')
     try {
-      const ch = await api.createChannel(webId, flowId)
+      const ch = await api.createChannel(apiKey, flowId)
       setChannel(ch)
     } catch (e: unknown) {
       setChannelError(e instanceof Error ? e.message : 'Failed to create channel')
@@ -62,15 +61,6 @@ export function AdminPanel() {
         </div>
         <div className="config-grid">
           <div className="config-field">
-            <label htmlFor="webId">Web ID (account_id)</label>
-            <input
-              id="webId"
-              value={webId}
-              onChange={e => { setWebId(e.target.value); storage.setWebId(e.target.value) }}
-              placeholder="Enter Web ID"
-            />
-          </div>
-          <div className="config-field">
             <label htmlFor="flowId">Flow ID</label>
             <input
               id="flowId"
@@ -79,7 +69,7 @@ export function AdminPanel() {
               placeholder="Enter Flow ID"
             />
           </div>
-          <div className="config-field" style={{ gridColumn: '1 / -1' }}>
+          <div className="config-field">
             <label htmlFor="apiKey">Account API Key</label>
             <div className="api-key-field">
               <input
@@ -121,6 +111,10 @@ export function AdminPanel() {
               <div className="channel-meta-item">
                 <label>Channel ID</label>
                 <span>{channel._id}</span>
+              </div>
+              <div className="channel-meta-item">
+                <label>Web ID</label>
+                <span>{channel.web_id}</span>
               </div>
               <div className="channel-meta-item">
                 <label>Flow ID</label>
