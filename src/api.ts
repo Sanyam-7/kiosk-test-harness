@@ -1,5 +1,5 @@
-import { API_BASE, ADMIN_API_BASE, CONV_API_BASE, CONV_API_PATH } from './config'
-import type { SessionEnvelope, ApiChannel, ApiKey, RequestLog } from './types'
+import { ADMIN_API_BASE, CONV_API_BASE, CONV_API_PATH } from './config'
+import type { SessionEnvelope, ApiChannel, RequestLog } from './types'
 
 type LogCallback = (log: RequestLog) => void
 let _logCallback: LogCallback = () => {}
@@ -17,7 +17,7 @@ async function request<T>(
   } = {}
 ): Promise<T> {
   const headers: Record<string, string> = {}
-  if (options.auth?.type === 'apikey') headers['Authorization'] = `ApiKey ${options.auth.key}`
+  if (options.auth?.type === 'apikey') headers['apiKey'] = options.auth.key
   if (options.auth?.type === 'bearer') headers['Authorization'] = `Bearer ${options.auth.token}`
   if (options.accountId) headers['X-Account-Id'] = options.accountId
   if (options.idempotencyKey) headers['X-Idempotency-Key'] = options.idempotencyKey
@@ -25,9 +25,11 @@ async function request<T>(
 
   const id = crypto.randomUUID()
   const start = Date.now()
-  const maskedAuth = headers['Authorization']
-    ? headers['Authorization'].replace(/(ApiKey|Bearer) .+/, '$1 ****')
-    : undefined
+  const maskedAuth = headers['apiKey']
+    ? 'apiKey ****'
+    : headers['Authorization']
+      ? headers['Authorization'].replace(/Bearer .+/, 'Bearer ****')
+      : undefined
 
   let status: number | null = null
   let responseBody: unknown = null
@@ -131,28 +133,3 @@ export function createChannel(webId: string, flowId: string) {
   })
 }
 
-export function listKeys(webId: string, channelId: string) {
-  return request<{ keys: ApiKey[] }>('GET', `${ADMIN_API_BASE}/v2/guided-conv/admin/api-channels/${channelId}/keys`, {
-    accountId: webId,
-  })
-}
-
-export function generateKey(webId: string, channelId: string, name: string, guidedIds: string[]) {
-  return request<{ key_id: string; key_prefix: string; name: string; status: string; raw_key: string; created_at: string }>(
-    'POST', `${ADMIN_API_BASE}/v2/guided-conv/admin/api-channels/${channelId}/keys`,
-    { accountId: webId, body: { name, guided_ids: guidedIds } }
-  )
-}
-
-export function rotateKey(webId: string, channelId: string, keyId: string) {
-  return request<{ key_id: string; raw_key: string; old_key_expires_at: string }>(
-    'POST', `${ADMIN_API_BASE}/v2/guided-conv/admin/api-channels/${channelId}/keys/${keyId}/rotate`,
-    { accountId: webId }
-  )
-}
-
-export function revokeKey(webId: string, channelId: string, keyId: string) {
-  return request<void>('DELETE', `${ADMIN_API_BASE}/v2/guided-conv/admin/api-channels/${channelId}/keys/${keyId}/revoke`, {
-    accountId: webId,
-  })
-}

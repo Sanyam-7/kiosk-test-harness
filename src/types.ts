@@ -45,22 +45,10 @@ export interface ApiError {
 }
 
 // Admin types
-export interface ApiKey {
-  key_id: string
-  key_prefix: string
-  name: string
-  status: 'active' | 'rotating' | 'revoked'
-  guided_ids: string[]
-  created_at: string
-  last_used_at: string | null
-  rotating_key_expires_at: string | null
-}
-
 export interface ApiChannel {
   _id: string
   flow_id: string
   web_id: string
-  keys: ApiKey[]
   rate_limit_rpm: number
   session_ttl_seconds: number
   created_at: string
