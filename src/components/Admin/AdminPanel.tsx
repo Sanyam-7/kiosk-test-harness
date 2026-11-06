@@ -9,6 +9,7 @@ import './Admin.css'
 export function AdminPanel() {
   const [flowId, setFlowId] = useState(storage.getFlowId)
   const [apiKey, setApiKey] = useState(storage.getApiKey)
+  const [userId, setUserId] = useState(storage.getUserId)
   const [showKey, setShowKey] = useState(false)
 
   const [channel, setChannel] = useState<ApiChannel | null>(null)
@@ -17,8 +18,8 @@ export function AdminPanel() {
   const [channelError, setChannelError] = useState('')
 
   function guardFields(): boolean {
-    if (!apiKey.trim() || !flowId.trim()) {
-      setLoadError('Account API Key and Flow ID are required')
+    if (!apiKey.trim() || !userId.trim() || !flowId.trim()) {
+      setLoadError('Account API Key, User ID and Flow ID are required')
       return true
     }
     setLoadError('')
@@ -34,10 +35,10 @@ export function AdminPanel() {
       setLoadError(e instanceof Error ? e.message : 'Failed to load channel')
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiKey, flowId])
+  }, [apiKey, userId, flowId])
 
   useEffect(() => {
-    if (apiKey && flowId) loadChannel()
+    if (apiKey && userId && flowId) loadChannel()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -83,6 +84,19 @@ export function AdminPanel() {
                 {showKey ? 'Hide' : 'Show'}
               </button>
             </div>
+          </div>
+          <div className="config-field">
+            <label htmlFor="userId">User ID</label>
+            <input
+              id="userId"
+              value={userId}
+              onChange={e => {
+                const v = e.target.value.trim()
+                setUserId(v)
+                storage.setUserId(v)
+              }}
+              placeholder="Enter your SMS Magic user ID (e.g. 1132448)"
+            />
           </div>
         </div>
         {loadError && <div className="error-banner">{loadError}</div>}

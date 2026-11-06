@@ -6,7 +6,7 @@ import NodeRenderer, { type AnswerPayload } from './NodeRenderer'
 import './Kiosk.css'
 
 type Screen = 'welcome' | 'loading' | 'flow' | 'ended' | 'error'
-type HistoryItem = { role: 'bot' | 'user'; text: string }
+type HistoryItem = { role: 'bot' | 'user'; text: string; imageUrl?: string }
 
 const IDLE_TIMEOUT_MS  = 60_000
 const COUNTDOWN_START  = 10
@@ -59,7 +59,7 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
     }
     processedNodeIds.current = new Set()
     setNodes([])
-    setHistory([])
+    setHistory(h => { h.forEach(i => i.imageUrl && URL.revokeObjectURL(i.imageUrl)); return [] })
     setCurrentBotText('')
     setTyped('')
     setTypewriterDone(true)
@@ -114,37 +114,106 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
       .join(' ')
     if (botText) setCurrentBotText(botText)
     else setTypewriterDone(true)
+    if (newNodes.some(n => n.type === 'end')) setPendingFinal(true)
   }, [nodes])
 
   // ── Typewriter + TTS ─────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!currentBotText) return
-    setTyped('')
-    setTypewriterDone(false)
+  // useEffect(() => {
+  //   if (!currentBotText) return
+  //   setTyped('')
+  //   setTypewriterDone(false)
 
-    window.speechSynthesis?.cancel()
-    const utt = new SpeechSynthesisUtterance(currentBotText)
-    window.speechSynthesis?.speak(utt)
+  //   window.speechSynthesis?.cancel()
+  //   const utt = new SpeechSynthesisUtterance(currentBotText)
+  //   window.speechSynthesis?.speak(utt)
 
+  //   let i = 0
+  //   const timer = setInterval(() => {
+  //     i++
+  //     setTyped(currentBotText.slice(0, i))
+  //     if (i >= currentBotText.length) {
+  //       clearInterval(timer)
+  //       setTypewriterDone(true)
+  //     }
+  //   }, 38)
+
+  //   return () => {
+  //     clearInterval(timer)
+  //     window.speechSynthesis?.cancel()
+  //   }
+  // }, [currentBotText])
+
+  // ── Typewriter + TTS ─────────────────────────────────────────────────────
+useEffect(() => {
+  if (!currentBotText) return
+  setTyped('')
+  setTypewriterDone(false)
+
+  const synth = window.speechSynthesis
+  let fallbackTimer: ReturnType<typeof setInterval> | undefined
+  let boundaryCheck: ReturnType<typeof setTimeout> | undefined
+  let gotBoundary = false
+  let cancelled = false
+
+  const finish = () => {
+    if (cancelled) return
+    clearInterval(fallbackTimer)
+    setTyped(currentBotText)
+    setTypewriterDone(true)
+  }
+
+  const startFallback = () => {
+    if (fallbackTimer) return
     let i = 0
-    const timer = setInterval(() => {
+    fallbackTimer = setInterval(() => {
       i++
       setTyped(currentBotText.slice(0, i))
-      if (i >= currentBotText.length) {
-        clearInterval(timer)
-        setTypewriterDone(true)
-      }
+      if (i >= currentBotText.length) finish()
     }, 38)
+  }
 
-    return () => {
-      clearInterval(timer)
-      window.speechSynthesis?.cancel()
+  if (!synth) {
+    startFallback()
+  } else {
+    synth.cancel()
+    const utt = new SpeechSynthesisUtterance(currentBotText)
+    // utt.rate = 1.0   // voice speed yahan adjust karo
+
+    utt.onboundary = (e: SpeechSynthesisEvent) => {
+      if (e.name && e.name !== 'word') return
+      gotBoundary = true
+      const rest = currentBotText.slice(e.charIndex)
+      const m = rest.match(/^\S+/)
+      const end = e.charIndex + (m ? m[0].length : 1)
+      setTyped(currentBotText.slice(0, end))
     }
-  }, [currentBotText])
+    utt.onend = finish
+    utt.onerror = () => {
+      if (!gotBoundary) startFallback()
+      else finish()
+    }
+
+    synth.speak(utt)
+
+    boundaryCheck = setTimeout(() => {
+      if (!gotBoundary && !cancelled) startFallback()
+    }, 600)
+  }
+
+  return () => {
+    cancelled = true
+    clearInterval(fallbackTimer)
+    clearTimeout(boundaryCheck)
+    synth?.cancel()
+  }
+}, [currentBotText])
 
   // ── Scroll history to bottom ─────────────────────────────────────────────
   useEffect(() => {
-    historyEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // setTimeout lets the camera overlay unmount and the history item paint
+    // before scrolling, so the photo is visible immediately after "Use This"
+    const t = setTimeout(() => historyEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+    return () => clearTimeout(t)
   }, [history])
 
   // ── Trigger end after typewriter finishes ────────────────────────────────
@@ -160,7 +229,7 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
         storage.clearSession()
         processedNodeIds.current = new Set()
         setNodes([])
-        setHistory([])
+        setHistory(h => { h.forEach(i => i.imageUrl && URL.revokeObjectURL(i.imageUrl)); return [] })
         setCurrentBotText('')
         setTyped('')
         setCountdown(null)
@@ -171,12 +240,17 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
 
   useEffect(() => () => clearInterval(endResetTimer.current), [])
 
-  useEffect(() => {
-    if (typewriterDone && pendingFinal) {
+const END_MESSAGE_DELAY_MS = 1000  // file ke upar constants ke saath rakho
+
+useEffect(() => {
+  if (typewriterDone && pendingFinal) {
+    const t = setTimeout(() => {
       setPendingFinal(false)
       triggerEnded()
-    }
-  }, [typewriterDone, pendingFinal, triggerEnded])
+    }, END_MESSAGE_DELAY_MS)
+    return () => clearTimeout(t)
+  }
+}, [typewriterDone, pendingFinal, triggerEnded])
 
   // ── On mount: restore session ────────────────────────────────────────────
   useEffect(() => {
@@ -260,27 +334,40 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
       }
       if (code === 'invalid_option_id') {
         setErrorMsg("Invalid option — please restart.")
+        setHistory(h => { h.forEach(i => i.imageUrl && URL.revokeObjectURL(i.imageUrl)); return [] })
         setScreen('error')
         return
       }
-      if (code === 'session_expired' || status === 404) {
+      if (code === 'session_expired' || code === 'session_ended' || status === 404) {
         storage.clearSession()
+        setHistory(h => { h.forEach(i => i.imageUrl && URL.revokeObjectURL(i.imageUrl)); return [] })
         setScreen('welcome')
         return
       }
+      // engine_error means the flow engine has no more nodes — treat as graceful end.
+      // This happens when the final node returns inbound_type != "none" so the session
+      // stays active, and the next continue call causes the engine to fail.
+      if (code === 'engine_error') {
+        storage.clearSession()
+        triggerEnded()
+        return
+      }
       setErrorMsg(extractMessage(err))
+      setHistory(h => { h.forEach(i => i.imageUrl && URL.revokeObjectURL(i.imageUrl)); return [] })
       setScreen('error')
     } finally {
       setSubmitting(false)
     }
-  }, [])
+  }, [triggerEnded])
 
   const onAnswer = useCallback((answer: AnswerPayload) => {
     // push current bot message + user answer to history
     if (currentBotText) {
       setHistory(h => [...h, { role: 'bot', text: currentBotText }])
     }
-    setHistory(h => [...h, { role: 'user', text: answerText(answer) }])
+    // Reuse the previewUrl created in NodeRenderer (already an object URL); avoids a second createObjectURL on the same File.
+    const imageUrl = answer.type === 'file' ? (answer.previewUrl ?? URL.createObjectURL(answer.file)) : undefined
+    setHistory(h => [...h, { role: 'user', text: answerText(answer), imageUrl }])
     setCurrentBotText('')
     setTyped('')
     setTypewriterDone(false)
@@ -328,6 +415,16 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
         {inspectorOpen ? '✕ Logs' : '☰ Logs'}
       </button>
 
+      {/* Start new session — visible mid-flow so staff can reset for next user */}
+      {(screen === 'flow' || screen === 'ended' || screen === 'error') && (
+        <button className="kiosk-reset-btn" onClick={resetToWelcome} title="Start new session">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+            <path fillRule="evenodd" d="M15.312 11.424a5.5 5.5 0 0 1-9.201 2.466l-.312-.311h2.433a.75.75 0 0 0 0-1.5H5.05a.75.75 0 0 0-.75.75v3.182a.75.75 0 0 0 1.5 0v-1.59l.311.311a7 7 0 0 0 11.712-3.138.75.75 0 0 0-1.511-.37Zm-9.624-6.848a5.5 5.5 0 0 1 9.2-2.466l.313.311h-2.433a.75.75 0 0 0 0 1.5h3.182a.75.75 0 0 0 .75-.75V.75a.75.75 0 0 0-1.5 0v1.59l-.311-.311A7 7 0 0 0 4.177 5.166a.75.75 0 0 0 1.511.41Z" clipRule="evenodd" />
+          </svg>
+          New Session
+        </button>
+      )}
+
       {/* ── screens ── */}
 
       {screen === 'welcome' && (
@@ -359,7 +456,18 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
           {history.length > 0 && (
             <div className="kiosk-history">
               {history.map((item, i) => (
-                <div key={i} className={`h-item h-${item.role}`}>{item.text}</div>
+                <div key={i} className={`h-item h-${item.role}${item.imageUrl ? ' h-has-photo' : ''}`}>
+                  {item.imageUrl
+                    ? <img
+                        className="h-photo"
+                        src={item.imageUrl}
+                        alt=""
+                        loading="eager"
+                        onLoad={() => historyEndRef.current?.scrollIntoView({ behavior: 'instant' })}
+                      />
+                    : item.text
+                  }
+                </div>
               ))}
               <div ref={historyEndRef} />
             </div>
@@ -383,7 +491,7 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
           </div>
 
           {/* node input — shown when typewriter done */}
-          {typewriterDone && activeInputNode && (
+          {typewriterDone && activeInputNode && !pendingFinal && (
             <NodeRenderer
               node={activeInputNode}
               onAnswer={onAnswer}

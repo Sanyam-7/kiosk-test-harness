@@ -15,10 +15,18 @@ export default function App() {
   return (
     <div className="app">
       <header className="banner">
-        <span className="banner-env">TARGET: {TARGET_ENV.toUpperCase()} — {API_BASE}</span>
+        <div className="banner-brand">
+          <div className="banner-logo">C</div>
+          <span className="banner-title">API Channel Harness</span>
+          <span className="banner-env">{TARGET_ENV} · {API_BASE}</span>
+        </div>
         <nav>
-          <button className={tab === 'kiosk' ? 'active' : ''} onClick={() => setTab('kiosk')}>Kiosk</button>
-          <button className={tab === 'admin' ? 'active' : ''} onClick={() => setTab('admin')}>Admin</button>
+          <button className={tab === 'kiosk' ? 'active' : ''} onClick={() => setTab('kiosk')}>
+            Kiosk
+          </button>
+          <button className={tab === 'admin' ? 'active' : ''} onClick={() => setTab('admin')}>
+            Admin
+          </button>
         </nav>
       </header>
       <main>

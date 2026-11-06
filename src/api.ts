@@ -1,5 +1,6 @@
 import { ADMIN_API_BASE, CONV_API_BASE, CONV_API_PATH } from './config'
 import type { SessionEnvelope, ApiChannel, RequestLog } from './types'
+import { storage } from './storage'
 
 type LogCallback = (log: RequestLog) => void
 let _logCallback: LogCallback = () => {}
@@ -17,7 +18,13 @@ async function request<T>(
   } = {}
 ): Promise<T> {
   const headers: Record<string, string> = {}
-  if (options.auth?.type === 'apikey') headers['apiKey'] = options.auth.key
+
+  if (options.auth?.type === 'apikey') {
+    headers['apiKey'] = options.auth.key
+    // userId is required by the backend for apiKey auth (profile_info needs it)
+    const userId = storage.getUserId()
+    if (userId) headers['userId'] = userId
+  }
   if (options.auth?.type === 'bearer') headers['Authorization'] = `Bearer ${options.auth.token}`
   if (options.accountId) headers['X-Account-Id'] = options.accountId
   if (options.idempotencyKey) headers['X-Idempotency-Key'] = options.idempotencyKey
@@ -132,4 +139,3 @@ export function createChannel(apiKey: string, flowId: string) {
     body: { flow_id: flowId },
   })
 }
-

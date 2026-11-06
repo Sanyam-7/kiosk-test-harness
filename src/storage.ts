@@ -1,6 +1,7 @@
 const SESSION_KEY = 'api_harness_session'
 const API_KEY_KEY = 'api_harness_apikey'
 const FLOW_ID_KEY = 'api_harness_flowid'
+const USER_ID_KEY = 'api_harness_userid'
 
 export interface StoredSession {
   session_id: string
@@ -21,4 +22,7 @@ export const storage = {
 
   getFlowId: () => localStorage.getItem(FLOW_ID_KEY) || '',
   setFlowId: (f: string) => localStorage.setItem(FLOW_ID_KEY, f),
+
+  getUserId: () => localStorage.getItem(USER_ID_KEY) || '',
+  setUserId: (u: string) => localStorage.setItem(USER_ID_KEY, u),
 }
