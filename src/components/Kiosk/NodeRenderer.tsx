@@ -4,8 +4,8 @@ import { FaceDetector as MPFaceDetector, FilesetResolver } from '@mediapipe/task
 import type { Detection } from '@mediapipe/tasks-vision'
 
 // ── MediaPipe face detector (singleton) ──────────────────────────────────────
-// Version package.json wale @mediapipe/tasks-vision se match rakho.
-// Kiosk ke liye wasm + model apne server par host karna best hai.
+// Pin this version to match @mediapipe/tasks-vision in package.json.
+// For production kiosks, self-host the wasm bundle and model file.
 const MP_WASM = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
 const MP_MODEL =
   'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite'
@@ -31,10 +31,10 @@ async function getMPDetector(): Promise<MPFaceDetector> {
   return mpDetectorPromise
 }
 
-// ── Capture tuning (kiosk camera ke hisaab se test karke adjust karo) ────────
+// ── Capture tuning — calibrate against your kiosk camera before deploying ────
 const FRAME_INTERVAL_MS = 150
-const STABLE_FRAMES = 6          // ~0.9s lagataar OK
-const FACE_SPAN_MIN = 0.28       // face width / video ki chhoti side
+const STABLE_FRAMES = 6          // ~0.9s of consecutive passing frames
+const FACE_SPAN_MIN = 0.28       // face width / shorter video dimension
 const FACE_SPAN_MAX = 0.70
 const CENTER_TOL_X = 0.12        // video width ka fraction
 const CENTER_TOL_Y = 0.15
@@ -127,7 +127,7 @@ function assessFrame(video: HTMLVideoElement, dets: Detection[]): Assessment {
   return { ok: true, message: 'Hold still…', box }
 }
 
-// Face ke around square crop (KYC style): margin + thoda upar shift (forehead/hair)
+// Square crop around the face (KYC style): scaled margin + slight upward shift to include forehead/hair
 function cropFaceSquare(video: HTMLVideoElement, box: Box): Promise<Blob | null> {
   const vw = video.videoWidth
   const vh = video.videoHeight
@@ -140,6 +140,186 @@ function cropFaceSquare(video: HTMLVideoElement, box: Box): Promise<Blob | null>
   canvas.width = CROP_SIZE
   canvas.height = CROP_SIZE
   canvas.getContext('2d')!.drawImage(video, sx, sy, side, side, 0, 0, CROP_SIZE, CROP_SIZE)
+  return new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.92))
+}
+
+// ── ID card detection (edge-based, no ML) ────────────────────────────────────
+const ID_REGION_SCALE = 1.5     // analyze a 1.5× region around the guide frame
+const ID_W = 240                // analysis canvas width
+const ID_EDGE_MIN = 10          // minimum edge gradient strength for a card edge
+const ID_PEAK_RATIO = 1.5       // edge peak / window average
+const ID_SCALE_MIN = 0.88
+const ID_SCALE_MAX = 1.12
+const ID_CENTER_TOL = 0.07
+const ID_ASPECT_TOL = 0.15      // width/height scale mismatch = tilt
+const ID_MOVE_TOL = 0.03
+const ID_STABLE_FRAMES = 6
+const ID_BLUR_MIN = 20
+const ID_BRIGHT_MIN = 60
+const ID_BRIGHT_MAX = 220
+const ID_GLARE_MAX = 0.08       // max fraction of pixels inside the guide with brightness >250
+const ID_CROP_PAD = 0.03
+
+type IdAssessment = { ok: boolean; message: string; cx?: number; cy?: number; scale?: number }
+
+const idCanvas = document.createElement('canvas')
+const idCtx = idCanvas.getContext('2d', { willReadFrequently: true })!
+
+// Map the CSS guide element to video pixel coordinates, accounting for object-fit: cover and horizontal mirror
+function guideToVideoRect(video: HTMLVideoElement, guideEl: HTMLElement): Box | null {
+  const vr = video.getBoundingClientRect()
+  const gr = guideEl.getBoundingClientRect()
+  const vw = video.videoWidth
+  const vh = video.videoHeight
+  if (!vw || !vh || !vr.width || !vr.height) return null
+  const scale = Math.max(vr.width / vw, vr.height / vh)
+  const offX = (vr.width - vw * scale) / 2
+  const offY = (vr.height - vh * scale) / 2
+  let x0 = (gr.left - vr.left - offX) / scale
+  let x1 = (gr.right - vr.left - offX) / scale
+  ;[x0, x1] = [vw - x1, vw - x0] // flip x coords: preview is horizontally mirrored
+  const y0 = (gr.top - vr.top - offY) / scale
+  const y1 = (gr.bottom - vr.top - offY) / scale
+  const cx0 = Math.max(0, x0), cy0 = Math.max(0, y0)
+  const cx1 = Math.min(vw, x1), cy1 = Math.min(vh, y1)
+  if (cx1 - cx0 < 50 || cy1 - cy0 < 30) return null
+  return { originX: cx0, originY: cy0, width: cx1 - cx0, height: cy1 - cy0 }
+}
+
+function findPeak(vals: number[]) {
+  let bi = 0
+  let sum = 0
+  for (let i = 0; i < vals.length; i++) {
+    sum += vals[i]
+    if (vals[i] > vals[bi]) bi = i
+  }
+  return { i: bi, v: vals[bi], mean: sum / vals.length }
+}
+
+function analyzeId(video: HTMLVideoElement, g: Box): IdAssessment {
+  const rw = g.width * ID_REGION_SCALE
+  const rh = g.height * ID_REGION_SCALE
+  const rx = g.originX + g.width / 2 - rw / 2
+  const ry = g.originY + g.height / 2 - rh / 2
+  const cw = ID_W
+  const ch = Math.round((ID_W * rh) / rw)
+  if (idCanvas.width !== cw || idCanvas.height !== ch) {
+    idCanvas.width = cw
+    idCanvas.height = ch
+  }
+  idCtx.drawImage(video, rx, ry, rw, rh, 0, 0, cw, ch)
+  const { data } = idCtx.getImageData(0, 0, cw, ch)
+  const gray = new Float32Array(cw * ch)
+  for (let i = 0; i < gray.length; i++) {
+    gray[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2]
+  }
+
+  const k = cw / rw
+  const gx0 = Math.round((g.originX - rx) * k)
+  const gy0 = Math.round((g.originY - ry) * k)
+  const gw = Math.round(g.width * k)
+  const gh = Math.round(g.height * k)
+  const gx1 = gx0 + gw
+  const gy1 = gy0 + gh
+
+  // 1. Brightness + glare check inside the guide region
+  let sum = 0, n = 0, glare = 0
+  for (let y = gy0; y < gy1; y++) {
+    for (let x = gx0; x < gx1; x++) {
+      const v = gray[y * cw + x]
+      sum += v
+      n++
+      if (v > 250) glare++
+    }
+  }
+  const brightness = sum / n
+  if (brightness < ID_BRIGHT_MIN) return { ok: false, message: 'Too dark, find better light' }
+  if (brightness > ID_BRIGHT_MAX) return { ok: false, message: 'Too bright, avoid direct light' }
+  if (glare / n > ID_GLARE_MAX) return { ok: false, message: 'Reduce glare, tilt the card slightly' }
+
+  // 2. Find all 4 card edges: strongest edge line within a ±20% search window on each side
+  const winY = Math.max(3, Math.round(gh * 0.2))
+  const winX = Math.max(3, Math.round(gw * 0.2))
+  const xa = gx0 + Math.round(gw * 0.2), xb = gx1 - Math.round(gw * 0.2)
+  const ya = gy0 + Math.round(gh * 0.2), yb = gy1 - Math.round(gh * 0.2)
+
+  const rowProfile = (yc: number) => {
+    const out: number[] = []
+    for (let y = yc - winY; y <= yc + winY; y++) {
+      let s = 0
+      for (let x = xa; x < xb; x++) s += Math.abs(gray[(y + 1) * cw + x] - gray[(y - 1) * cw + x])
+      out.push(s / (xb - xa))
+    }
+    return out
+  }
+  const colProfile = (xc: number) => {
+    const out: number[] = []
+    for (let x = xc - winX; x <= xc + winX; x++) {
+      let s = 0
+      for (let y = ya; y < yb; y++) s += Math.abs(gray[y * cw + x + 1] - gray[y * cw + x - 1])
+      out.push(s / (yb - ya))
+    }
+    return out
+  }
+
+  const top = findPeak(rowProfile(gy0))
+  const bottom = findPeak(rowProfile(gy1))
+  const left = findPeak(colProfile(gx0))
+  const right = findPeak(colProfile(gx1))
+  const valid = (p: { v: number; mean: number }) => p.v >= ID_EDGE_MIN && p.v >= p.mean * ID_PEAK_RATIO
+  if (!valid(top) || !valid(bottom) || !valid(left) || !valid(right)) {
+    return { ok: false, message: 'Place the whole ID card inside the frame' }
+  }
+
+  const cardTop = gy0 - winY + top.i
+  const cardBottom = gy1 - winY + bottom.i
+  const cardLeft = gx0 - winX + left.i
+  const cardRight = gx1 - winX + right.i
+  const sx = (cardRight - cardLeft) / gw
+  const sy = (cardBottom - cardTop) / gh
+  const scale = (sx + sy) / 2
+  const cx = ((cardLeft + cardRight) / 2 - (gx0 + gx1) / 2) / gw
+  const cy = ((cardTop + cardBottom) / 2 - (gy0 + gy1) / 2) / gh
+
+  if (scale > ID_SCALE_MAX) return { ok: false, message: 'Move back a little' }
+  if (scale < ID_SCALE_MIN) return { ok: false, message: 'Move closer' }
+  if (Math.abs(sx - sy) > ID_ASPECT_TOL) return { ok: false, message: 'Hold the card flat and straight' }
+  if (Math.abs(cx) > ID_CENTER_TOL || Math.abs(cy) > ID_CENTER_TOL) {
+    return { ok: false, message: 'Center the card in the frame' }
+  }
+
+  // 3. Blur (guide interior)
+  const ix0 = gx0 + Math.round(gw * 0.1), ix1 = gx1 - Math.round(gw * 0.1)
+  const iy0 = gy0 + Math.round(gh * 0.1), iy1 = gy1 - Math.round(gh * 0.1)
+  let s = 0, s2 = 0, m = 0
+  for (let y = iy0; y < iy1; y++) {
+    for (let x = ix0; x < ix1; x++) {
+      const i = y * cw + x
+      const lap = 4 * gray[i] - gray[i - 1] - gray[i + 1] - gray[i - cw] - gray[i + cw]
+      s += lap
+      s2 += lap * lap
+      m++
+    }
+  }
+  const blur = s2 / m - (s / m) * (s / m)
+  if (blur < ID_BLUR_MIN) return { ok: false, message: 'Hold still, image is blurry' }
+
+  return { ok: true, message: 'Hold still…', cx, cy, scale }
+}
+
+// Crop any rect from the video frame — used for ID capture with a small padding around the guide
+function cropRect(video: HTMLVideoElement, r: Box, pad = 0, maxW = 1280): Promise<Blob | null> {
+  const px = r.width * pad
+  const py = r.height * pad
+  const sx = Math.max(0, r.originX - px)
+  const sy = Math.max(0, r.originY - py)
+  const sw = Math.min(video.videoWidth - sx, r.width + 2 * px)
+  const sh = Math.min(video.videoHeight - sy, r.height + 2 * py)
+  const k = Math.min(1, maxW / sw)
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(sw * k)
+  canvas.height = Math.round(sh * k)
+  canvas.getContext('2d')!.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height)
   return new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.92))
 }
 
@@ -264,13 +444,15 @@ type CapturePhase = 'consent' | 'scanning' | 'analyzing' | 'captured' | 'fallbac
 
 function CaptureInput({ node, onAnswer, disabled }: Props) {
   const [phase, setPhase] = useState<CapturePhase>('consent')
-  const [guidance, setGuidance] = useState('Position your face in the oval')
+  const [guidance, setGuidance] = useState('')
   const [ready, setReady] = useState(false)
   const [detectorFailed, setDetectorFailed] = useState(false)
+  const [idAssist, setIdAssist] = useState(false)
   const [capturedUrl, setCapturedUrl] = useState<string | null>(null)
   const [capturedFile, setCapturedFile] = useState<File | null>(null)
 
   const videoRef = useRef<HTMLVideoElement>(null)
+  const guideRef = useRef<HTMLDivElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const capturedRef = useRef(false)
@@ -279,6 +461,9 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
   const captureType = node.input?.capture_type ?? 'face'
   const isIdCapture = captureType === 'id'
   const accepted = node.input?.accepted_types?.join(',') ?? 'image/*'
+  const initialGuidance = isIdCapture
+    ? 'Place your ID card inside the frame'
+    : 'Position your face in the oval'
 
   const stopStream = useCallback(() => {
     streamRef.current?.getTracks().forEach(t => t.stop())
@@ -295,10 +480,27 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
     setPhase('captured')
   }, [])
 
-  // Auto-capture: fresh detection + face crop. Face na mile to wapas scanning.
+  // Auto-capture: re-verify conditions and crop. If the check fails, return to scanning.
   const capturePhoto = useCallback(async () => {
     const video = videoRef.current
     if (capturedRef.current || !video) return
+
+    if (isIdCapture) {
+      const g = guideRef.current ? guideToVideoRect(video, guideRef.current) : null
+      const a = g ? analyzeId(video, g) : null
+      if (!g || !a || !a.ok) {
+        analyzeRef.current = false
+        setGuidance(a?.message ?? 'Hold the card steady')
+        setPhase('scanning')
+        return
+      }
+      capturedRef.current = true
+      const blob = await cropRect(video, g, ID_CROP_PAD)
+      stopStream()
+      if (!blob) { capturedRef.current = false; setPhase('fallback'); return }
+      showCaptured(blob, 'id_capture.jpg')
+      return
+    }
 
     let box: Box | null = null
     try {
@@ -322,24 +524,30 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
     stopStream()
     if (!blob) { capturedRef.current = false; setPhase('fallback'); return }
     showCaptured(blob)
-  }, [stopStream, showCaptured])
+  }, [isIdCapture, stopStream, showCaptured])
 
-  // Detector fail hone par manual capture (center square crop)
-  const manualFaceCapture = useCallback(async () => {
+  // Manual capture fallback: for face when detector fails, for ID when auto-capture hasn't triggered in 10s
+  const manualCapture = useCallback(async () => {
     const video = videoRef.current
     if (!video || capturedRef.current) return
     capturedRef.current = true
-    const s = Math.min(video.videoWidth, video.videoHeight) * 0.5
-    const box: Box = {
-      originX: video.videoWidth / 2 - s / 2,
-      originY: video.videoHeight / 2 - s / 2,
-      width: s,
-      height: s,
+    let blob: Blob | null = null
+    if (isIdCapture) {
+      const g = guideRef.current ? guideToVideoRect(video, guideRef.current) : null
+      if (g) blob = await cropRect(video, g, ID_CROP_PAD)
+    } else {
+      const s = Math.min(video.videoWidth, video.videoHeight) * 0.5
+      blob = await cropFaceSquare(video, {
+        originX: video.videoWidth / 2 - s / 2,
+        originY: video.videoHeight / 2 - s / 2,
+        width: s,
+        height: s,
+      })
     }
-    const blob = await cropFaceSquare(video, box)
     stopStream()
-    if (blob) showCaptured(blob)
-  }, [stopStream, showCaptured])
+    if (blob) showCaptured(blob, isIdCapture ? 'id_capture.jpg' : 'capture.jpg')
+    else { capturedRef.current = false; setPhase('fallback') }
+  }, [isIdCapture, stopStream, showCaptured])
 
   const usePhoto = useCallback(() => {
     if (!capturedFile) return
@@ -357,7 +565,8 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
     capturedRef.current = false
     analyzeRef.current = false
     setReady(false)
-    setGuidance('Position your face in the oval')
+    setIdAssist(false)
+    setGuidance(initialGuidance)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -367,7 +576,7 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
     } catch {
       setPhase('fallback')
     }
-  }, [])
+  }, [initialGuidance])
 
   const retake = useCallback(() => {
     if (capturedUrl) URL.revokeObjectURL(capturedUrl)
@@ -376,7 +585,7 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
     startCamera()
   }, [capturedUrl, startCamera])
 
-  // Live detection loop (sirf face mode)
+  // ── Live detection: FACE ──
   useEffect(() => {
     if (phase !== 'scanning' || isIdCapture) return
     let cancelled = false
@@ -408,7 +617,7 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
           }
 
           setReady(a.ok)
-          setGuidance(ok ? 'Hold still…' : a.ok ? 'Hold still…' : a.message)
+          setGuidance(a.ok ? 'Hold still…' : a.message)
 
           if (ok) {
             stable++
@@ -424,11 +633,57 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
       timer = setTimeout(loop, FRAME_INTERVAL_MS)
     }
 
-    timer = setTimeout(loop, 800) // camera warm-up
+    timer = setTimeout(loop, 800)
     return () => { cancelled = true; clearTimeout(timer) }
   }, [phase, isIdCapture, goAnalyze])
 
-  // analyzing: chhota pause, phir fresh detect + crop
+  // ── Live detection: ID CARD ──
+  useEffect(() => {
+    if (phase !== 'scanning' || !isIdCapture) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let stable = 0
+    let prev: { cx: number; cy: number; scale: number } | null = null
+
+    const loop = () => {
+      if (cancelled) return
+      const video = videoRef.current
+      const guideEl = guideRef.current
+      if (video && guideEl && video.readyState >= 2 && video.videoWidth) {
+        const g = guideToVideoRect(video, guideEl)
+        if (g) {
+          const a = analyzeId(video, g)
+          let ok = a.ok
+          if (a.ok && a.cx !== undefined) {
+            const moved = prev
+              ? Math.abs(a.cx - prev.cx) + Math.abs(a.cy! - prev.cy) + Math.abs(a.scale! - prev.scale)
+              : 0
+            if (prev && moved > ID_MOVE_TOL) ok = false
+            prev = { cx: a.cx, cy: a.cy!, scale: a.scale! }
+          } else {
+            prev = null
+          }
+
+          setReady(a.ok)
+          setGuidance(a.ok ? 'Hold still…' : a.message)
+
+          if (ok) {
+            stable++
+            if (stable >= ID_STABLE_FRAMES) { goAnalyze(); return }
+          } else {
+            stable = 0
+          }
+        }
+      }
+      timer = setTimeout(loop, FRAME_INTERVAL_MS)
+    }
+
+    timer = setTimeout(loop, 800)
+    const assist = setTimeout(() => setIdAssist(true), 10000)
+    return () => { cancelled = true; clearTimeout(timer); clearTimeout(assist) }
+  }, [phase, isIdCapture, goAnalyze])
+
+  // Brief pause in the analyzing phase, then run a fresh check and crop
   useEffect(() => {
     if (phase !== 'analyzing') return
     const t = setTimeout(capturePhoto, 600)
@@ -442,26 +697,6 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
     setCapturedUrl(URL.createObjectURL(f))
     setPhase('captured')
   }, [])
-
-  // ID card: fixed center crop (manual capture button)
-  const cropAndSubmit = useCallback((sourceUrl: string, sourceFile: File) => {
-    const img = new Image()
-    img.onload = () => {
-      const canvas = document.createElement('canvas')
-      const cw = Math.round(img.width * 0.85)
-      const ch = Math.round(img.height * 0.54)
-      const cx = Math.round((img.width - cw) / 2)
-      const cy = Math.round((img.height - ch) / 2)
-      canvas.width = cw
-      canvas.height = ch
-      canvas.getContext('2d')!.drawImage(img, cx, cy, cw, ch, 0, 0, cw, ch)
-      canvas.toBlob(blob => {
-        if (!blob) { onAnswer({ type: 'file', file: sourceFile, previewUrl: sourceUrl }); return }
-        showCaptured(blob, sourceFile.name)
-      }, 'image/jpeg', 0.92)
-    }
-    img.src = sourceUrl
-  }, [onAnswer, showCaptured])
 
   if (phase === 'submitted') return null
 
@@ -483,6 +718,7 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
   }
 
   const guideColor = ready ? '#7BAE8B' : '#E0A458'
+  const showManual = phase === 'scanning' && (isIdCapture ? idAssist : detectorFailed)
 
   return (
     <div className="camera-overlay">
@@ -503,12 +739,14 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
       }
 
       {(phase === 'scanning' || phase === 'analyzing') && (
-        <div className="camera-guide">
+        <div className="camera-guide" ref={guideRef}>
           {isIdCapture ? (
             <svg className="id-frame-svg" viewBox="0 0 100 63" fill="none">
               <rect x="2" y="2" width="96" height="59" rx="4"
-                stroke="#7BAE8B" strokeWidth="0.8" strokeDasharray="4 2.5"
-                opacity={phase === 'analyzing' ? 0.9 : 0.65} />
+                stroke={guideColor} strokeWidth="0.8"
+                strokeDasharray={ready ? '0' : '4 2.5'}
+                opacity={phase === 'analyzing' ? 1 : 0.8}
+                style={{ transition: 'stroke 0.2s' }} />
               {([
                 [2,2,'h8'], [2,2,'v8'],
                 [98,2,'h-8'], [98,2,'v8'],
@@ -516,7 +754,8 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
                 [98,61,'h-8'], [98,61,'v-8'],
               ] as [number,number,string][]).map(([x,y,d],i) => (
                 <path key={i} d={`M${x} ${y} ${d}`}
-                  stroke="#7BAE8B" strokeWidth="2" strokeLinecap="round"/>
+                  stroke={guideColor} strokeWidth="2" strokeLinecap="round"
+                  style={{ transition: 'stroke 0.2s' }} />
               ))}
             </svg>
           ) : (
@@ -543,35 +782,16 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
       )}
 
       {phase === 'scanning' && (
-        <p className="camera-scan-label">
-          {isIdCapture
-            ? 'Fit your ID card inside the frame'
-            : detectorFailed ? 'Auto-detect unavailable. Align your face and tap Capture' : guidance}
+        <p className={`camera-scan-label ${ready ? 'ok' : 'warn'}`}>
+          {!isIdCapture && detectorFailed
+            ? 'Auto-detect unavailable. Align your face and tap Capture'
+            : guidance}
         </p>
       )}
       {phase === 'analyzing' && <p className="camera-scan-label analyzing">Capturing…</p>}
 
-      {/* Manual capture: ID mode ya detector fail */}
-      {phase === 'scanning' && (isIdCapture || detectorFailed) && (
-        <button
-          className="id-capture-btn"
-          onClick={() => {
-            const video = videoRef.current
-            if (!video) return
-            if (!isIdCapture) { manualFaceCapture(); return }
-            const canvas = document.createElement('canvas')
-            canvas.width = video.videoWidth || 1280
-            canvas.height = video.videoHeight || 720
-            canvas.getContext('2d')!.drawImage(video, 0, 0)
-            canvas.toBlob(blob => {
-              if (!blob) return
-              const file = new File([blob], 'id_capture.jpg', { type: 'image/jpeg' })
-              const url = URL.createObjectURL(file)
-              stopStream()
-              cropAndSubmit(url, file)
-            }, 'image/jpeg', 0.92)
-          }}
-        >
+      {showManual && (
+        <button className="id-capture-btn" onClick={manualCapture}>
           <svg viewBox="0 0 24 24" fill="none" width="20" height="20">
             <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8"/>
             <circle cx="12" cy="12" r="4.5" fill="currentColor"/>

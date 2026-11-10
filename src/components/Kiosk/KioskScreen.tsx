@@ -177,7 +177,7 @@ useEffect(() => {
   } else {
     synth.cancel()
     const utt = new SpeechSynthesisUtterance(currentBotText)
-    // utt.rate = 1.0   // voice speed yahan adjust karo
+    // utt.rate = 1.0   // adjust voice speed here if needed
 
     utt.onboundary = (e: SpeechSynthesisEvent) => {
       if (e.name && e.name !== 'word') return
@@ -240,7 +240,7 @@ useEffect(() => {
 
   useEffect(() => () => clearInterval(endResetTimer.current), [])
 
-const END_MESSAGE_DELAY_MS = 1000  // file ke upar constants ke saath rakho
+const END_MESSAGE_DELAY_MS = 1000  // keep with the other constants at the top of the file
 
 useEffect(() => {
   if (typewriterDone && pendingFinal) {
