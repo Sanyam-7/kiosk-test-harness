@@ -292,6 +292,7 @@ useEffect(() => {
       storage.setSession({
         session_id: envelope.session_id,
         api_key: apiKey,
+        user_id: storage.getUserId(),
         flow_id: flowId,
         expires_at: envelope.expires_at,
       })
