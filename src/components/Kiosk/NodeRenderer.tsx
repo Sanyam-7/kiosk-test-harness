@@ -839,11 +839,83 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
   )
 }
 
+// ── otp input ────────────────────────────────────────────────────────────────
+const OTP_LEN = 4
+
+function OtpInput({ node, onAnswer, disabled }: Props) {
+  const [digits, setDigits] = useState(() => Array(OTP_LEN).fill(''))
+  const r0 = useRef<HTMLInputElement>(null)
+  const r1 = useRef<HTMLInputElement>(null)
+  const r2 = useRef<HTMLInputElement>(null)
+  const r3 = useRef<HTMLInputElement>(null)
+  const refs = [r0, r1, r2, r3]
+  const submitted = useRef(false)
+
+  // Reset when backend re-sends OTP node (invalid / resend / expired)
+  useEffect(() => {
+    setDigits(Array(OTP_LEN).fill(''))
+    submitted.current = false
+    refs[0].current?.focus()
+  }, [node.node_id])
+
+  const update = (i: number, val: string) => {
+    const d = val.replace(/\D/g, '').slice(0, 1)
+    const next = [...digits]
+    next[i] = d
+    setDigits(next)
+    if (d && i < OTP_LEN - 1) {
+      refs[i + 1].current?.focus()
+    } else if (d && i === OTP_LEN - 1) {
+      // auto-submit when last digit filled
+      const code = [...next].join('')
+      if (code.length === OTP_LEN && !submitted.current) {
+        submitted.current = true
+        onAnswer({ type: 'text', value: code })
+      }
+    }
+  }
+
+  const onKeyDown = (i: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Backspace' && !digits[i] && i > 0) refs[i - 1].current?.focus()
+  }
+
+  return (
+    <div className="kiosk-input-bar">
+      {node.error && <p className="k-node-error">{node.error.message}</p>}
+      <div style={{ display: 'flex', gap: '14px', justifyContent: 'center', padding: '8px 0 16px' }}>
+        {digits.map((d, i) => (
+          <input
+            key={i}
+            ref={refs[i]}
+            className="k-text-field k-otp-digit"
+            type="text"
+            inputMode="numeric"
+            maxLength={1}
+            value={d}
+            onChange={e => update(i, e.target.value)}
+            onKeyDown={e => onKeyDown(i, e)}
+            disabled={disabled}
+            autoFocus={i === 0}
+          />
+        ))}
+      </div>
+      {disabled && (
+        <p style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--k-text-faint)', margin: 0 }}>
+          Verifying…
+        </p>
+      )}
+    </div>
+  )
+}
+
 // ── main renderer ────────────────────────────────────────────────────────────
 export default function NodeRenderer({ node, onAnswer, disabled }: Props) {
   switch (node.type) {
     case 'question_text': {
       const { inbound_type, options } = node.input ?? {}
+      if (inbound_type === 'otp') {
+        return <OtpInput node={node} onAnswer={onAnswer} disabled={disabled} />
+      }
       if (inbound_type === 'single_select' && options?.length) {
         const textOnAnswer = (a: AnswerPayload) =>
           onAnswer(a.type === 'option' ? { type: 'text', value: a.label ?? a.option_id } : a)

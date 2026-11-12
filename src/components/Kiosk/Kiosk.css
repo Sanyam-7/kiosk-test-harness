@@ -372,6 +372,19 @@
   cursor: not-allowed;
 }
 
+/* OTP digit boxes override the pill shape of k-text-field */
+.k-otp-digit {
+  flex: none !important;
+  width: 64px !important;
+  height: 72px !important;
+  border-radius: 14px !important;
+  padding: 0 !important;
+  text-align: center !important;
+  font-size: 2rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+}
+
 .k-send-btn {
   width: 48px;
   height: 48px;
@@ -652,25 +665,33 @@
 
 .camera-scan-label {
   position: absolute;
-  top: 36px;
+  top: 28px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 5;
-  color: rgba(255,255,255,.7);
+  max-width: 90vw;
+  padding: 10px 22px;
+  border-radius: 999px;
+  background: rgba(0,0,0,.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #fff;
   font-family: var(--k-sans);
-  font-size: 0.75rem;
-  font-weight: 400;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  transition: color 400ms ease;
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-align: center;
+  white-space: normal;
+  transition: color 250ms ease;
 }
 
+.camera-scan-label.warn { color: #F2C078; }
+.camera-scan-label.ok   { color: #9AD3A8; }
+
 .camera-scan-label.analyzing {
-  color: #7BAE8B;
+  color: #9AD3A8;
   font-weight: 600;
-  letter-spacing: 0.16em;
-}
+}git
 
 /* ── Manual capture button (shown when FaceDetector API unavailable) ─────── */
 .camera-manual-btn {
