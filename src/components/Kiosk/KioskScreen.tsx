@@ -8,8 +8,8 @@ import './Kiosk.css'
 type Screen = 'welcome' | 'loading' | 'flow' | 'ended' | 'error'
 type HistoryItem = { role: 'bot' | 'user'; text: string; imageUrl?: string }
 
-const IDLE_TIMEOUT_MS  = 60_000
-const COUNTDOWN_START  = 10
+const IDLE_TIMEOUT_MS  = 150_000  // 2.5 min idle; total reset = IDLE + COUNTDOWN = 3 min < 5 min backend expiry
+const COUNTDOWN_START  = 30        // 30s warning before reset
 const ARC_CIRCUMFERENCE = 2 * Math.PI * 24  // r=24 on 56×56 SVG
 
 function answerText(a: AnswerPayload): string {
@@ -33,12 +33,7 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
   const [typewriterDone, setTypewriterDone] = useState(true)
   const [pendingFinal, setPendingFinal]   = useState(false)
 
-  // Each real API response increments nodesGen; processedGen tracks the last one
-  // the bot-message effect already handled. This fires on every new response
-  // regardless of whether node_ids changed, so normal progression, loops, and
-  // error retries all trigger the typewriter correctly.
-  const nodesGenRef      = useRef(0)
-  const processedGenRef  = useRef(0)
+  const prevNodesRef = useRef<SessionNode[]>([])
   const historyEndRef    = useRef<HTMLDivElement>(null)
   const idempotencyKey   = useRef('')
   const pendingAnswer    = useRef<AnswerPayload | null>(null)
@@ -62,6 +57,7 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
       try { await api.deleteSession(sess.session_id, sess.api_key) } catch { /* best-effort */ }
       storage.clearSession()
     }
+    prevNodesRef.current = []
     setNodes([])
     setHistory(h => { h.forEach(i => i.imageUrl && URL.revokeObjectURL(i.imageUrl)); return [] })
     storage.clearHistory()
@@ -110,13 +106,19 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
 
   // ── Detect new bot messages when nodes change ────────────────────────────
   useEffect(() => {
-    if (processedGenRef.current >= nodesGenRef.current) return
-    processedGenRef.current = nodesGenRef.current
+    const prev = prevNodesRef.current
+    prevNodesRef.current = nodes
     if (!nodes.length) return
-    const botText = nodes.flatMap(n => n.messages.map(m => m.text)).filter(Boolean).join(' ')
+    const newByPos = nodes.slice(prev.length)
+    const changedByError = nodes
+      .slice(0, Math.min(nodes.length, prev.length))
+      .filter((n, i) => n.error !== prev[i]?.error)
+    const toProcess = [...changedByError, ...newByPos]
+    if (!toProcess.length) return
+    const botText = toProcess.flatMap(n => n.messages.map(m => m.text)).filter(Boolean).join(' ')
     if (botText) setCurrentBotText(botText)
     else setTypewriterDone(true)
-    if (nodes.some(n => n.type === 'end')) setPendingFinal(true)
+    if (toProcess.some(n => n.type === 'end')) setPendingFinal(true)
   }, [nodes])
 
   // ── Typewriter + TTS ─────────────────────────────────────────────────────
@@ -229,6 +231,7 @@ useEffect(() => {
       if (n <= 0) {
         clearInterval(endResetTimer.current)
         storage.clearSession()
+        prevNodesRef.current = []
         setNodes([])
         setHistory(h => { h.forEach(i => i.imageUrl && URL.revokeObjectURL(i.imageUrl)); return [] })
         storage.clearHistory()
@@ -262,7 +265,6 @@ useEffect(() => {
       setScreen('loading')
       try {
         const envelope = await api.getSession(sess.session_id, sess.api_key)
-        nodesGenRef.current++
         setNodes(envelope.nodes)
         setHistory(storage.getHistory())
         setScreen('flow')
@@ -285,6 +287,7 @@ useEffect(() => {
       return
     }
     setScreen('loading')
+    prevNodesRef.current = []
     setHistory([])
     storage.clearHistory()
     setCurrentBotText('')
@@ -300,7 +303,6 @@ useEffect(() => {
         flow_id: flowId,
         expires_at: envelope.expires_at,
       })
-      nodesGenRef.current++
       setNodes(envelope.nodes)
       setScreen('flow')
       if (envelope.is_final) setPendingFinal(true)
@@ -328,7 +330,6 @@ useEffect(() => {
         envelope = await api.sendMessage(sess.session_id, sess.api_key, input, key)
       }
 
-      nodesGenRef.current++
       setNodes(envelope.nodes)
       if (envelope.is_final) setPendingFinal(true)
     } catch (err: unknown) {
