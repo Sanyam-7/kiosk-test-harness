@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, useId } from 'react'
 import type { SessionNode } from '../../types'
 import { FaceDetector as MPFaceDetector, FilesetResolver } from '@mediapipe/tasks-vision'
 import type { Detection } from '@mediapipe/tasks-vision'
@@ -430,15 +430,15 @@ function FileInput({ node, onAnswer, disabled }: Props) {
   const [file, setFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const uid = useId()
   const accept = node.input?.accepted_types?.join(',') ?? '*/*'
 
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
     if (!f) return
     if (previewUrl) URL.revokeObjectURL(previewUrl)
-    const url = URL.createObjectURL(f)
     setFile(f)
-    setPreviewUrl(url)
+    setPreviewUrl(URL.createObjectURL(f))
   }
 
   const clear = () => {
@@ -454,30 +454,44 @@ function FileInput({ node, onAnswer, disabled }: Props) {
   }
 
   const isImage = file?.type.startsWith('image/')
+  const isPdf = file?.type === 'application/pdf'
 
   return (
     <div className="kiosk-input-bar">
       {node.error && <p className="k-node-error">{node.error.message}</p>}
+      {/* Hidden input — label triggers it directly, preserving the user-gesture chain
+          so the file picker opens immediately (no delay from programmatic .click()). */}
       <input
+        id={uid}
         ref={inputRef}
         type="file"
         accept={accept}
         onChange={onFileChange}
         style={{ display: 'none' }}
-        aria-label="Choose file"
       />
       {!file ? (
         <div className="k-consent">
-          <button className="k-primary-btn" onClick={() => inputRef.current?.click()} disabled={disabled}>
-            Choose File
-          </button>
+          <label
+            htmlFor={uid}
+            className="k-primary-btn"
+            style={disabled ? { opacity: 0.5, cursor: 'not-allowed', pointerEvents: 'none' } : undefined}
+          >
+            Upload File
+          </label>
         </div>
       ) : (
         <div className="k-consent">
-          {isImage && previewUrl
-            ? <img src={previewUrl} alt="preview" style={{ maxHeight: '160px', maxWidth: '100%', borderRadius: '8px', marginBottom: '12px' }} />
-            : <p style={{ margin: '0 0 12px', fontSize: '0.9rem' }}>{file.name} ({(file.size / 1024).toFixed(1)} KB)</p>
-          }
+          {isImage && previewUrl ? (
+            <img src={previewUrl} alt="preview"
+              style={{ maxHeight: '160px', maxWidth: '100%', borderRadius: '8px', marginBottom: '12px' }} />
+          ) : isPdf && previewUrl ? (
+            <iframe src={previewUrl} title="PDF preview"
+              style={{ width: '100%', height: '160px', border: 'none', borderRadius: '8px', marginBottom: '12px' }} />
+          ) : (
+            <p style={{ margin: '0 0 12px', fontSize: '0.9rem' }}>
+              {file.name} ({(file.size / 1024).toFixed(1)} KB)
+            </p>
+          )}
           <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
             <button className="camera-confirm-retake" onClick={clear} disabled={disabled}>Cancel</button>
             <button className="camera-confirm-use" onClick={submit} disabled={disabled}>Use This</button>
@@ -633,13 +647,21 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
     setReady(false)
     setIdAssist(false)
     setGuidance(initialGuidance)
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
-      })
+    // Try progressively relaxed constraints — some browsers/devices reject facingMode
+    // or specific resolutions even when a camera is present.
+    const constraintsList = [
+      { video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } },
+      { video: { width: { ideal: 1280 }, height: { ideal: 720 } } },
+      { video: true },
+    ]
+    let stream: MediaStream | null = null
+    for (const c of constraintsList) {
+      try { stream = await navigator.mediaDevices.getUserMedia(c); break } catch { /* try next */ }
+    }
+    if (stream) {
       streamRef.current = stream
       setPhase('scanning')
-    } catch {
+    } else {
       setPhase('fallback')
     }
   }, [initialGuidance])

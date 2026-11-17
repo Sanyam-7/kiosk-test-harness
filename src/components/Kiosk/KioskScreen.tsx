@@ -33,7 +33,12 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
   const [typewriterDone, setTypewriterDone] = useState(true)
   const [pendingFinal, setPendingFinal]   = useState(false)
 
-  const prevNodesRef = useRef<SessionNode[]>([])
+  // Each real API response increments nodesGen; processedGen tracks the last one
+  // the bot-message effect already handled. This fires on every new response
+  // regardless of whether node_ids changed, so normal progression, loops, and
+  // error retries all trigger the typewriter correctly.
+  const nodesGenRef      = useRef(0)
+  const processedGenRef  = useRef(0)
   const historyEndRef    = useRef<HTMLDivElement>(null)
   const idempotencyKey   = useRef('')
   const pendingAnswer    = useRef<AnswerPayload | null>(null)
@@ -57,7 +62,6 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
       try { await api.deleteSession(sess.session_id, sess.api_key) } catch { /* best-effort */ }
       storage.clearSession()
     }
-    prevNodesRef.current = []
     setNodes([])
     setHistory(h => { h.forEach(i => i.imageUrl && URL.revokeObjectURL(i.imageUrl)); return [] })
     storage.clearHistory()
@@ -106,19 +110,13 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
 
   // ── Detect new bot messages when nodes change ────────────────────────────
   useEffect(() => {
-    const prev = prevNodesRef.current
-    prevNodesRef.current = nodes
+    if (processedGenRef.current >= nodesGenRef.current) return
+    processedGenRef.current = nodesGenRef.current
     if (!nodes.length) return
-    const newByPos = nodes.slice(prev.length)
-    const changedByError = nodes
-      .slice(0, Math.min(nodes.length, prev.length))
-      .filter((n, i) => n.error !== prev[i]?.error)
-    const toProcess = [...changedByError, ...newByPos]
-    if (!toProcess.length) return
-    const botText = toProcess.flatMap(n => n.messages.map(m => m.text)).filter(Boolean).join(' ')
+    const botText = nodes.flatMap(n => n.messages.map(m => m.text)).filter(Boolean).join(' ')
     if (botText) setCurrentBotText(botText)
     else setTypewriterDone(true)
-    if (toProcess.some(n => n.type === 'end')) setPendingFinal(true)
+    if (nodes.some(n => n.type === 'end')) setPendingFinal(true)
   }, [nodes])
 
   // ── Typewriter + TTS ─────────────────────────────────────────────────────
@@ -231,7 +229,6 @@ useEffect(() => {
       if (n <= 0) {
         clearInterval(endResetTimer.current)
         storage.clearSession()
-        prevNodesRef.current = []
         setNodes([])
         setHistory(h => { h.forEach(i => i.imageUrl && URL.revokeObjectURL(i.imageUrl)); return [] })
         storage.clearHistory()
@@ -265,6 +262,7 @@ useEffect(() => {
       setScreen('loading')
       try {
         const envelope = await api.getSession(sess.session_id, sess.api_key)
+        nodesGenRef.current++
         setNodes(envelope.nodes)
         setHistory(storage.getHistory())
         setScreen('flow')
@@ -287,7 +285,6 @@ useEffect(() => {
       return
     }
     setScreen('loading')
-    prevNodesRef.current = []
     setHistory([])
     storage.clearHistory()
     setCurrentBotText('')
@@ -303,6 +300,7 @@ useEffect(() => {
         flow_id: flowId,
         expires_at: envelope.expires_at,
       })
+      nodesGenRef.current++
       setNodes(envelope.nodes)
       setScreen('flow')
       if (envelope.is_final) setPendingFinal(true)
@@ -330,6 +328,7 @@ useEffect(() => {
         envelope = await api.sendMessage(sess.session_id, sess.api_key, input, key)
       }
 
+      nodesGenRef.current++
       setNodes(envelope.nodes)
       if (envelope.is_final) setPendingFinal(true)
     } catch (err: unknown) {
