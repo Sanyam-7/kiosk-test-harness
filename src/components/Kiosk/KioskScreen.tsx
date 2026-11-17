@@ -6,7 +6,7 @@ import NodeRenderer, { type AnswerPayload } from './NodeRenderer'
 import './Kiosk.css'
 
 type Screen = 'welcome' | 'loading' | 'flow' | 'ended' | 'error'
-type HistoryItem = { role: 'bot' | 'user'; text: string; imageUrl?: string }
+type HistoryItem = { role: 'bot' | 'user'; text: string; imageUrl?: string; fileMime?: string }
 
 const IDLE_TIMEOUT_MS  = 150_000  // 2.5 min idle; total reset = IDLE + COUNTDOWN = 3 min < 5 min backend expiry
 const COUNTDOWN_START  = 30        // 30s warning before reset
@@ -373,7 +373,8 @@ useEffect(() => {
     const botEntry = currentBotText ? { role: 'bot' as const, text: currentBotText } : null
     // Reuse the previewUrl created in NodeRenderer (already an object URL); avoids a second createObjectURL on the same File.
     const imageUrl = answer.type === 'file' ? (answer.previewUrl ?? URL.createObjectURL(answer.file)) : undefined
-    const userEntry = { role: 'user' as const, text: answerText(answer), imageUrl }
+    const fileMime = answer.type === 'file' ? answer.file.type : undefined
+    const userEntry = { role: 'user' as const, text: answerText(answer), imageUrl, fileMime }
     setHistory(h => {
       const updated = [...h, ...(botEntry ? [botEntry] : []), userEntry]
       storage.setHistory(updated)
@@ -469,13 +470,15 @@ useEffect(() => {
               {history.map((item, i) => (
                 <div key={i} className={`h-item h-${item.role}${item.imageUrl ? ' h-has-photo' : ''}`}>
                   {item.imageUrl
-                    ? <img
-                        className="h-photo"
-                        src={item.imageUrl}
-                        alt=""
-                        loading="eager"
-                        onLoad={() => historyEndRef.current?.scrollIntoView({ behavior: 'instant' })}
-                      />
+                    ? item.fileMime === 'application/pdf'
+                      ? <iframe className="h-pdf" src={item.imageUrl} title="PDF preview" />
+                      : <img
+                          className="h-photo"
+                          src={item.imageUrl}
+                          alt=""
+                          loading="eager"
+                          onLoad={() => historyEndRef.current?.scrollIntoView({ behavior: 'instant' })}
+                        />
                     : item.text
                   }
                 </div>

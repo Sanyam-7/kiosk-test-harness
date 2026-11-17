@@ -288,6 +288,13 @@
   transform: none;               /* mirror hata diya, same as captured preview */
 }
 
+.h-pdf {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
 /* ── Typewriter stage ───────────────────────────────────────────────────────── */
 .kiosk-stage {
   flex: 1;
