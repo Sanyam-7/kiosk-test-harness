@@ -425,6 +425,69 @@ function OptionsInput({ node, onAnswer, disabled }: Props) {
   )
 }
 
+// ── question_capture / file upload ───────────────────────────────────────────
+function FileInput({ node, onAnswer, disabled }: Props) {
+  const [file, setFile] = useState<File | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const accept = node.input?.accepted_types?.join(',') ?? '*/*'
+
+  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    if (!f) return
+    if (previewUrl) URL.revokeObjectURL(previewUrl)
+    const url = URL.createObjectURL(f)
+    setFile(f)
+    setPreviewUrl(url)
+  }
+
+  const clear = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl)
+    setFile(null)
+    setPreviewUrl(null)
+    if (inputRef.current) inputRef.current.value = ''
+  }
+
+  const submit = () => {
+    if (!file || !previewUrl) return
+    onAnswer({ type: 'file', file, previewUrl })
+  }
+
+  const isImage = file?.type.startsWith('image/')
+
+  return (
+    <div className="kiosk-input-bar">
+      {node.error && <p className="k-node-error">{node.error.message}</p>}
+      <input
+        ref={inputRef}
+        type="file"
+        accept={accept}
+        onChange={onFileChange}
+        style={{ display: 'none' }}
+        aria-label="Choose file"
+      />
+      {!file ? (
+        <div className="k-consent">
+          <button className="k-primary-btn" onClick={() => inputRef.current?.click()} disabled={disabled}>
+            Choose File
+          </button>
+        </div>
+      ) : (
+        <div className="k-consent">
+          {isImage && previewUrl
+            ? <img src={previewUrl} alt="preview" style={{ maxHeight: '160px', maxWidth: '100%', borderRadius: '8px', marginBottom: '12px' }} />
+            : <p style={{ margin: '0 0 12px', fontSize: '0.9rem' }}>{file.name} ({(file.size / 1024).toFixed(1)} KB)</p>
+          }
+          <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+            <button className="camera-confirm-retake" onClick={clear} disabled={disabled}>Cancel</button>
+            <button className="camera-confirm-use" onClick={submit} disabled={disabled}>Use This</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Face dot positions (in 100×133 SVG viewBox) ──────────────────────────────
 const FACE_DOTS: [number, number][] = [
   [50,10],[37,14],[63,14],[26,21],[74,21],
@@ -442,6 +505,8 @@ const FACE_DOTS: [number, number][] = [
 // ── question_capture ─────────────────────────────────────────────────────────
 type CapturePhase = 'consent' | 'scanning' | 'analyzing' | 'captured' | 'fallback' | 'submitted'
 
+const MAX_RETAKES = 3
+
 function CaptureInput({ node, onAnswer, disabled }: Props) {
   const [phase, setPhase] = useState<CapturePhase>('consent')
   const [guidance, setGuidance] = useState('')
@@ -450,6 +515,7 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
   const [idAssist, setIdAssist] = useState(false)
   const [capturedUrl, setCapturedUrl] = useState<string | null>(null)
   const [capturedFile, setCapturedFile] = useState<File | null>(null)
+  const [retakeCount, setRetakeCount] = useState(0)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const guideRef = useRef<HTMLDivElement>(null)
@@ -582,6 +648,7 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
     if (capturedUrl) URL.revokeObjectURL(capturedUrl)
     setCapturedUrl(null)
     setCapturedFile(null)
+    setRetakeCount(c => c + 1)
     startCamera()
   }, [capturedUrl, startCamera])
 
@@ -814,7 +881,12 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
             </svg>
           </div>
           <div className="camera-confirm-bar">
-            <button className="camera-confirm-retake" onClick={retake}>Retake</button>
+            {retakeCount < MAX_RETAKES
+              ? <button className="camera-confirm-retake" onClick={retake} disabled={disabled}>
+                  Retake {MAX_RETAKES - retakeCount > 1 ? `(${MAX_RETAKES - retakeCount} left)` : '(last chance)'}
+                </button>
+              : <span className="camera-confirm-retake-exhausted">No more retakes</span>
+            }
             <button className="camera-confirm-use" onClick={usePhoto}>Use This</button>
           </div>
         </>
@@ -925,8 +997,13 @@ export default function NodeRenderer({ node, onAnswer, disabled }: Props) {
     }
     case 'question_options':
       return <OptionsInput node={node} onAnswer={onAnswer} disabled={disabled} />
-    case 'question_capture':
+    case 'question_capture': {
+      const ct = node.input?.capture_type
+      if (!ct || ct === 'file') {
+        return <FileInput node={node} onAnswer={onAnswer} disabled={disabled} />
+      }
       return <CaptureInput node={node} onAnswer={onAnswer} disabled={disabled} />
+    }
     default:
       return null
   }

@@ -812,6 +812,15 @@
   border-color: rgba(255,255,255,.55);
 }
 
+.camera-confirm-retake-exhausted {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  color: rgba(255,255,255,.45);
+  padding: 0 16px;
+}
+
 .camera-confirm-use {
   background: #7BAE8B;
   color: #fff;

@@ -33,7 +33,7 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
   const [typewriterDone, setTypewriterDone] = useState(true)
   const [pendingFinal, setPendingFinal]   = useState(false)
 
-  const processedNodeIds = useRef(new Set<string>())
+  const prevNodesRef = useRef<SessionNode[]>([])
   const historyEndRef    = useRef<HTMLDivElement>(null)
   const idempotencyKey   = useRef('')
   const pendingAnswer    = useRef<AnswerPayload | null>(null)
@@ -57,9 +57,10 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
       try { await api.deleteSession(sess.session_id, sess.api_key) } catch { /* best-effort */ }
       storage.clearSession()
     }
-    processedNodeIds.current = new Set()
+    prevNodesRef.current = []
     setNodes([])
     setHistory(h => { h.forEach(i => i.imageUrl && URL.revokeObjectURL(i.imageUrl)); return [] })
+    storage.clearHistory()
     setCurrentBotText('')
     setTyped('')
     setTypewriterDone(true)
@@ -105,16 +106,19 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
 
   // ── Detect new bot messages when nodes change ────────────────────────────
   useEffect(() => {
-    const newNodes = nodes.filter(n => !processedNodeIds.current.has(n.node_id))
-    if (!newNodes.length) return
-    newNodes.forEach(n => processedNodeIds.current.add(n.node_id))
-    const botText = newNodes
-      .flatMap(n => n.messages.map(m => m.text))
-      .filter(Boolean)
-      .join(' ')
+    const prev = prevNodesRef.current
+    prevNodesRef.current = nodes
+    if (!nodes.length) return
+    const newByPos = nodes.slice(prev.length)
+    const changedByError = nodes
+      .slice(0, Math.min(nodes.length, prev.length))
+      .filter((n, i) => n.error !== prev[i]?.error)
+    const toProcess = [...changedByError, ...newByPos]
+    if (!toProcess.length) return
+    const botText = toProcess.flatMap(n => n.messages.map(m => m.text)).filter(Boolean).join(' ')
     if (botText) setCurrentBotText(botText)
     else setTypewriterDone(true)
-    if (newNodes.some(n => n.type === 'end')) setPendingFinal(true)
+    if (toProcess.some(n => n.type === 'end')) setPendingFinal(true)
   }, [nodes])
 
   // ── Typewriter + TTS ─────────────────────────────────────────────────────
@@ -227,9 +231,10 @@ useEffect(() => {
       if (n <= 0) {
         clearInterval(endResetTimer.current)
         storage.clearSession()
-        processedNodeIds.current = new Set()
+        prevNodesRef.current = []
         setNodes([])
         setHistory(h => { h.forEach(i => i.imageUrl && URL.revokeObjectURL(i.imageUrl)); return [] })
+        storage.clearHistory()
         setCurrentBotText('')
         setTyped('')
         setCountdown(null)
@@ -240,7 +245,7 @@ useEffect(() => {
 
   useEffect(() => () => clearInterval(endResetTimer.current), [])
 
-const END_MESSAGE_DELAY_MS = 1000  // keep with the other constants at the top of the file
+const END_MESSAGE_DELAY_MS = 3000  // keep with the other constants at the top of the file
 
 useEffect(() => {
   if (typewriterDone && pendingFinal) {
@@ -261,6 +266,7 @@ useEffect(() => {
       try {
         const envelope = await api.getSession(sess.session_id, sess.api_key)
         setNodes(envelope.nodes)
+        setHistory(storage.getHistory())
         setScreen('flow')
       } catch (err: unknown) {
         storage.clearSession()
@@ -281,8 +287,9 @@ useEffect(() => {
       return
     }
     setScreen('loading')
-    processedNodeIds.current = new Set()
+    prevNodesRef.current = []
     setHistory([])
+    storage.clearHistory()
     setCurrentBotText('')
     setTyped('')
     setTypewriterDone(true)
@@ -363,12 +370,15 @@ useEffect(() => {
 
   const onAnswer = useCallback((answer: AnswerPayload) => {
     // push current bot message + user answer to history
-    if (currentBotText) {
-      setHistory(h => [...h, { role: 'bot', text: currentBotText }])
-    }
+    const botEntry = currentBotText ? { role: 'bot' as const, text: currentBotText } : null
     // Reuse the previewUrl created in NodeRenderer (already an object URL); avoids a second createObjectURL on the same File.
     const imageUrl = answer.type === 'file' ? (answer.previewUrl ?? URL.createObjectURL(answer.file)) : undefined
-    setHistory(h => [...h, { role: 'user', text: answerText(answer), imageUrl }])
+    const userEntry = { role: 'user' as const, text: answerText(answer), imageUrl }
+    setHistory(h => {
+      const updated = [...h, ...(botEntry ? [botEntry] : []), userEntry]
+      storage.setHistory(updated)
+      return updated
+    })
     setCurrentBotText('')
     setTyped('')
     setTypewriterDone(false)
