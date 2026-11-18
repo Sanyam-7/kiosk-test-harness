@@ -6,7 +6,7 @@ import NodeRenderer, { type AnswerPayload } from './NodeRenderer'
 import './Kiosk.css'
 
 type Screen = 'welcome' | 'loading' | 'flow' | 'ended' | 'error'
-type HistoryItem = { role: 'bot' | 'user'; text: string; imageUrl?: string; fileMime?: string }
+type HistoryItem = { role: 'bot' | 'user'; text: string; imageUrl?: string; fileMime?: string; fileName?: string }
 
 const IDLE_TIMEOUT_MS  = 150_000  // 2.5 min idle; total reset = IDLE + COUNTDOWN = 3 min < 5 min backend expiry
 const COUNTDOWN_START  = 30        // 30s warning before reset
@@ -374,7 +374,8 @@ useEffect(() => {
     // Reuse the previewUrl created in NodeRenderer (already an object URL); avoids a second createObjectURL on the same File.
     const imageUrl = answer.type === 'file' ? (answer.previewUrl ?? URL.createObjectURL(answer.file)) : undefined
     const fileMime = answer.type === 'file' ? answer.file.type : undefined
-    const userEntry = { role: 'user' as const, text: answerText(answer), imageUrl, fileMime }
+    const fileName = answer.type === 'file' ? answer.file.name : undefined
+    const userEntry = { role: 'user' as const, text: answerText(answer), imageUrl, fileMime, fileName }
     setHistory(h => {
       const updated = [...h, ...(botEntry ? [botEntry] : []), userEntry]
       storage.setHistory(updated)
@@ -468,18 +469,20 @@ useEffect(() => {
           {history.length > 0 && (
             <div className="kiosk-history">
               {history.map((item, i) => (
-                <div key={i} className={`h-item h-${item.role}${item.imageUrl ? ' h-has-photo' : ''}`}>
-                  {item.imageUrl
-                    ? item.fileMime === 'application/pdf'
+                <div key={i} className={`h-item h-${item.role}${item.imageUrl && item.fileMime?.startsWith('image/') ? ' h-has-photo' : ''}`}>
+                  {item.imageUrl && item.fileMime?.startsWith('image/')
+                    ? <img
+                        className="h-photo"
+                        src={item.imageUrl}
+                        alt=""
+                        loading="eager"
+                        onLoad={() => historyEndRef.current?.scrollIntoView({ behavior: 'instant' })}
+                      />
+                    : item.imageUrl && item.fileMime === 'application/pdf'
                       ? <iframe className="h-pdf" src={item.imageUrl} title="PDF preview" />
-                      : <img
-                          className="h-photo"
-                          src={item.imageUrl}
-                          alt=""
-                          loading="eager"
-                          onLoad={() => historyEndRef.current?.scrollIntoView({ behavior: 'instant' })}
-                        />
-                    : item.text
+                      : item.fileMime
+                        ? <span className="h-file-badge">📎 {item.fileName || item.text}</span>
+                        : item.text
                   }
                 </div>
               ))}

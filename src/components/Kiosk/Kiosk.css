@@ -295,6 +295,20 @@
   border: none;
 }
 
+.h-file-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #374151;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── Typewriter stage ───────────────────────────────────────────────────────── */
 .kiosk-stage {
   flex: 1;

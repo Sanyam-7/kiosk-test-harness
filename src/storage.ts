@@ -4,7 +4,7 @@ const FLOW_ID_KEY  = 'api_harness_flowid'
 const USER_ID_KEY  = 'api_harness_userid'
 const HISTORY_KEY  = 'api_harness_history'
 
-type PersistedHistoryItem = { role: 'bot' | 'user'; text: string }
+type PersistedHistoryItem = { role: 'bot' | 'user'; text: string; fileMime?: string; fileName?: string }
 
 export interface StoredSession {
   session_id: string
@@ -34,6 +34,6 @@ export const storage = {
     try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]') } catch { return [] }
   },
   setHistory: (h: PersistedHistoryItem[]) =>
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(h.map(i => ({ role: i.role, text: i.text })))),
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(h.map(i => ({ role: i.role, text: i.text, fileMime: i.fileMime, fileName: i.fileName })))),
   clearHistory: () => localStorage.removeItem(HISTORY_KEY),
 }
