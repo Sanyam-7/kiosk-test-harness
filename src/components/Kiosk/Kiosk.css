@@ -326,6 +326,20 @@
   border: none;
 }
 
+.h-video {
+  display: block;
+  width: 100%;
+  max-height: 240px;
+  border-radius: 8px;
+  background: #000;
+}
+
+.h-audio {
+  display: block;
+  width: 100%;
+  margin: 4px 0;
+}
+
 .h-file-badge {
   display: inline-block;
   padding: 4px 8px;

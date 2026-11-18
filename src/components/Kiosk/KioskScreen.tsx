@@ -382,8 +382,10 @@ useEffect(() => {
     // push current bot message + user answer to history
     const botEntry = currentBotText ? { role: 'bot' as const, text: currentBotText } : null
     // Reuse the previewUrl created in NodeRenderer (already an object URL); avoids a second createObjectURL on the same File.
-    const imageUrl = answer.type === 'file' ? (answer.previewUrl ?? URL.createObjectURL(answer.file)) : undefined
-    const userEntry = { role: 'user' as const, text: answerText(answer), imageUrl }
+    const fileUrl  = answer.type === 'file' ? (answer.previewUrl ?? URL.createObjectURL(answer.file)) : undefined
+    const fileMime = answer.type === 'file' ? answer.file.type : undefined
+    const fileName = answer.type === 'file' ? answer.file.name : undefined
+    const userEntry = { role: 'user' as const, text: answerText(answer), imageUrl: fileUrl, fileMime, fileName }
     setHistory(h => {
       const updated = [...h, ...(botEntry ? [botEntry] : []), userEntry]
       storage.setHistory(updated)
@@ -476,7 +478,7 @@ useEffect(() => {
           {history.length > 0 && (
             <div className="kiosk-history">
               {history.map((item, i) => (
-                <div key={i} className={`h-item h-${item.role}${item.imageUrl && (item.fileMime?.startsWith('image/') || item.fileMime === 'application/pdf') ? ' h-has-photo' : ''}`}>
+                <div key={i} className={`h-item h-${item.role}${item.imageUrl ? ' h-has-photo' : ''}`}>
                   {item.imageUrl && item.fileMime?.startsWith('image/')
                     ? <div className="h-photo-wrap">
                         <img
@@ -497,11 +499,15 @@ useEffect(() => {
                           </svg>
                         </a>
                       </div>
-                    : item.imageUrl && item.fileMime === 'application/pdf'
-                      ? <iframe className="h-pdf" src={item.imageUrl} title="PDF preview" />
-                      : item.fileMime
-                        ? <span className="h-file-badge">📎 {item.fileName || item.text}</span>
-                        : item.text
+                    : item.imageUrl && item.fileMime?.startsWith('video/')
+                      ? <video className="h-video" src={item.imageUrl} controls playsInline />
+                      : item.imageUrl && item.fileMime?.startsWith('audio/')
+                        ? <audio className="h-audio" src={item.imageUrl} controls />
+                        : item.imageUrl && item.fileMime === 'application/pdf'
+                          ? <iframe className="h-pdf" src={item.imageUrl} title="PDF preview" />
+                          : item.fileMime
+                            ? <span className="h-file-badge">📎 {item.fileName || item.text}</span>
+                            : item.text
                   }
                 </div>
               ))}
