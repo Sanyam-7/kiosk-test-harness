@@ -39,6 +39,9 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
   // error retries all trigger the typewriter correctly.
   const nodesGenRef      = useRef(0)
   const processedGenRef  = useRef(0)
+  // Set to true when restoring nodes from storage on page refresh so the
+  // typewriter effect shows text instantly instead of re-animating.
+  const restoreRef       = useRef(false)
   const historyEndRef    = useRef<HTMLDivElement>(null)
   const idempotencyKey   = useRef('')
   const pendingAnswer    = useRef<AnswerPayload | null>(null)
@@ -148,6 +151,13 @@ export default function KioskScreen({ logs }: { logs: RequestLog[] }) {
   // ── Typewriter + TTS ─────────────────────────────────────────────────────
 useEffect(() => {
   if (!currentBotText) return
+  // On page refresh restore: show text instantly, skip animation + TTS.
+  if (restoreRef.current) {
+    restoreRef.current = false
+    setTyped(currentBotText)
+    setTypewriterDone(true)
+    return
+  }
   setTyped('')
   setTypewriterDone(false)
 
@@ -264,6 +274,15 @@ useEffect(() => {
         const envelope = await api.getSession(sess.session_id, sess.api_key)
         setNodes(envelope.nodes)
         setHistory(storage.getHistory())
+        // Show current bot message instantly without re-animating on refresh.
+        const botText = (envelope.nodes as SessionNode[])
+          .flatMap(n => n.messages.map(m => m.text))
+          .filter(Boolean)
+          .join(' ')
+        if (botText) {
+          restoreRef.current = true
+          setCurrentBotText(botText)
+        }
         setScreen('flow')
       } catch (err: unknown) {
         storage.clearSession()
