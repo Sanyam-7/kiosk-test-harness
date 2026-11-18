@@ -469,7 +469,7 @@ useEffect(() => {
           {history.length > 0 && (
             <div className="kiosk-history">
               {history.map((item, i) => (
-                <div key={i} className={`h-item h-${item.role}${item.imageUrl && item.fileMime?.startsWith('image/') ? ' h-has-photo' : ''}`}>
+                <div key={i} className={`h-item h-${item.role}${item.imageUrl && (item.fileMime?.startsWith('image/') || item.fileMime === 'application/pdf') ? ' h-has-photo' : ''}`}>
                   {item.imageUrl && item.fileMime?.startsWith('image/')
                     ? <img
                         className="h-photo"
