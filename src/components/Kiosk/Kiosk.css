@@ -280,12 +280,64 @@
   border: 2px solid var(--k-accent);
 }
 
+.h-photo-wrap {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  line-height: 0;
+}
+
 .h-photo {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
   transform: none;               /* mirror hata diya, same as captured preview */
+}
+
+.h-photo-download {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(0,0,0,.52);
+  backdrop-filter: blur(6px);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.2s;
+  text-decoration: none;
+}
+
+.h-photo-wrap:hover .h-photo-download,
+.h-photo-wrap:focus-within .h-photo-download {
+  opacity: 1;
+}
+
+.h-pdf {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+.h-file-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #374151;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Typewriter stage ───────────────────────────────────────────────────────── */
@@ -819,6 +871,13 @@
   font-size: 0.8rem;
   color: rgba(255,255,255,.45);
   padding: 0 16px;
+}
+
+.camera-download-link {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .camera-confirm-use {

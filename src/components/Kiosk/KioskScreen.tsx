@@ -6,7 +6,7 @@ import NodeRenderer, { type AnswerPayload } from './NodeRenderer'
 import './Kiosk.css'
 
 type Screen = 'welcome' | 'loading' | 'flow' | 'ended' | 'error'
-type HistoryItem = { role: 'bot' | 'user'; text: string; imageUrl?: string }
+type HistoryItem = { role: 'bot' | 'user'; text: string; imageUrl?: string; fileMime?: string; fileName?: string }
 
 const IDLE_TIMEOUT_MS  = 60_000
 const COUNTDOWN_START  = 10
@@ -262,7 +262,6 @@ useEffect(() => {
       setScreen('loading')
       try {
         const envelope = await api.getSession(sess.session_id, sess.api_key)
-        nodesGenRef.current++
         setNodes(envelope.nodes)
         setHistory(storage.getHistory())
         setScreen('flow')
@@ -339,6 +338,18 @@ useEffect(() => {
         setTimeout(() => sendAnswer(answer, key, retry + 1), 500)
         return
       }
+      if (code === 'file_too_large' || code === 'invalid_file') {
+        // Recoverable: show error on the active node, don't leave the flow screen.
+        // The backend has already incremented its retry counter; the node stays
+        // active so the user can try a smaller file or the backend routes out.
+        setNodes(prev => {
+          if (!prev.length) return prev
+          const last = prev[prev.length - 1]
+          return [...prev.slice(0, -1), { ...last, error: { code: code ?? 'file_too_large', message: extractMessage(err) } }]
+        })
+        setTypewriterDone(true)
+        return
+      }
       if (code === 'invalid_option_id') {
         setErrorMsg("Invalid option — please restart.")
         setHistory(h => { h.forEach(i => i.imageUrl && URL.revokeObjectURL(i.imageUrl)); return [] })
@@ -381,7 +392,6 @@ useEffect(() => {
     setCurrentBotText('')
     setTyped('')
     setTypewriterDone(false)
-
     idempotencyKey.current = crypto.randomUUID()
     pendingAnswer.current = answer
     sendAnswer(answer, idempotencyKey.current)
@@ -466,16 +476,32 @@ useEffect(() => {
           {history.length > 0 && (
             <div className="kiosk-history">
               {history.map((item, i) => (
-                <div key={i} className={`h-item h-${item.role}${item.imageUrl ? ' h-has-photo' : ''}`}>
-                  {item.imageUrl
-                    ? <img
-                        className="h-photo"
-                        src={item.imageUrl}
-                        alt=""
-                        loading="eager"
-                        onLoad={() => historyEndRef.current?.scrollIntoView({ behavior: 'instant' })}
-                      />
-                    : item.text
+                <div key={i} className={`h-item h-${item.role}${item.imageUrl && (item.fileMime?.startsWith('image/') || item.fileMime === 'application/pdf') ? ' h-has-photo' : ''}`}>
+                  {item.imageUrl && item.fileMime?.startsWith('image/')
+                    ? <div className="h-photo-wrap">
+                        <img
+                          className="h-photo"
+                          src={item.imageUrl}
+                          alt=""
+                          loading="eager"
+                          onLoad={() => historyEndRef.current?.scrollIntoView({ behavior: 'instant' })}
+                        />
+                        <a
+                          className="h-photo-download"
+                          href={item.imageUrl}
+                          download={item.fileName ?? 'capture.jpg'}
+                          aria-label="Download photo"
+                        >
+                          <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+                            <path d="M10 3a.75.75 0 0 1 .75.75v7.19l2.47-2.47a.75.75 0 1 1 1.06 1.06l-3.75 3.75a.75.75 0 0 1-1.06 0L5.72 9.53a.75.75 0 0 1 1.06-1.06l2.47 2.47V3.75A.75.75 0 0 1 10 3ZM3.75 15a.75.75 0 0 0 0 1.5h12.5a.75.75 0 0 0 0-1.5H3.75Z"/>
+                          </svg>
+                        </a>
+                      </div>
+                    : item.imageUrl && item.fileMime === 'application/pdf'
+                      ? <iframe className="h-pdf" src={item.imageUrl} title="PDF preview" />
+                      : item.fileMime
+                        ? <span className="h-file-badge">📎 {item.fileName || item.text}</span>
+                        : item.text
                   }
                 </div>
               ))}

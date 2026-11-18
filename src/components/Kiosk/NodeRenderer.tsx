@@ -426,16 +426,35 @@ function OptionsInput({ node, onAnswer, disabled }: Props) {
 }
 
 // ── question_capture / file upload ───────────────────────────────────────────
+const FILE_MAX_RETRIES = 3
+
 function FileInput({ node, onAnswer, disabled }: Props) {
   const [file, setFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [sizeError, setSizeError] = useState('')
+  const [failCount, setFailCount] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  const bypassRef = useRef<HTMLInputElement>(null)
   const uid = useId()
+  const bypassUid = useId()
   const accept = node.input?.accepted_types?.join(',') ?? '*/*'
+  const maxMb = node.input?.max_file_size_mb ?? 10
 
-  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>, bypassSizeCheck = false) => {
     const f = e.target.files?.[0]
     if (!f) return
+    if (inputRef.current) inputRef.current.value = ''
+    if (!bypassSizeCheck && f.size > maxMb * 1024 * 1024) {
+      const remaining = FILE_MAX_RETRIES - failCount - 1
+      setFailCount(c => c + 1)
+      setSizeError(
+        remaining > 0
+          ? `File too large (${(f.size / (1024 * 1024)).toFixed(1)} MB). Max allowed: ${maxMb} MB. ${remaining} attempt${remaining === 1 ? '' : 's'} left.`
+          : `File too large (${(f.size / (1024 * 1024)).toFixed(1)} MB). Try a smaller file or upload anyway.`
+      )
+      return
+    }
+    setSizeError('')
     if (previewUrl) URL.revokeObjectURL(previewUrl)
     setFile(f)
     setPreviewUrl(URL.createObjectURL(f))
@@ -445,6 +464,7 @@ function FileInput({ node, onAnswer, disabled }: Props) {
     if (previewUrl) URL.revokeObjectURL(previewUrl)
     setFile(null)
     setPreviewUrl(null)
+    setSizeError('')
     if (inputRef.current) inputRef.current.value = ''
   }
 
@@ -455,10 +475,12 @@ function FileInput({ node, onAnswer, disabled }: Props) {
 
   const isImage = file?.type.startsWith('image/')
   const isPdf = file?.type === 'application/pdf'
+  const exhausted = failCount >= FILE_MAX_RETRIES
 
   return (
     <div className="kiosk-input-bar">
       {node.error && <p className="k-node-error">{node.error.message}</p>}
+      {sizeError && <p className="k-node-error">{sizeError}</p>}
       {/* Hidden input — label triggers it directly, preserving the user-gesture chain
           so the file picker opens immediately (no delay from programmatic .click()). */}
       <input
@@ -466,18 +488,37 @@ function FileInput({ node, onAnswer, disabled }: Props) {
         ref={inputRef}
         type="file"
         accept={accept}
-        onChange={onFileChange}
+        onChange={e => onFileChange(e, false)}
+        style={{ display: 'none' }}
+      />
+      {/* Bypass input — skips size check, used after retries are exhausted */}
+      <input
+        id={bypassUid}
+        ref={bypassRef}
+        type="file"
+        accept={accept}
+        onChange={e => onFileChange(e, true)}
         style={{ display: 'none' }}
       />
       {!file ? (
-        <div className="k-consent">
-          <label
-            htmlFor={uid}
-            className="k-primary-btn"
-            style={disabled ? { opacity: 0.5, cursor: 'not-allowed', pointerEvents: 'none' } : undefined}
-          >
-            Upload File
-          </label>
+        <div className="k-consent" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+          {!exhausted ? (
+            <label
+              htmlFor={uid}
+              className="k-primary-btn"
+              style={disabled ? { opacity: 0.5, cursor: 'not-allowed', pointerEvents: 'none' } : undefined}
+            >
+              Upload File
+            </label>
+          ) : (
+            <label
+              htmlFor={bypassUid}
+              className="k-primary-btn"
+              style={disabled ? { opacity: 0.5, cursor: 'not-allowed', pointerEvents: 'none' } : undefined}
+            >
+              Upload Anyway
+            </label>
+          )}
         </div>
       ) : (
         <div className="k-consent">
@@ -779,13 +820,26 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
     return () => clearTimeout(t)
   }, [phase, capturePhoto])
 
+  const maxMb = node.input?.max_file_size_mb ?? 10
+
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
     if (!f) return
+    if (fileRef.current) fileRef.current.value = ''
+    if (f.size > maxMb * 1024 * 1024) {
+      const next = retakeCount + 1
+      setRetakeCount(next)
+      if (next >= MAX_RETAKES) {
+        setGuidance(`File too large (${(f.size / (1024 * 1024)).toFixed(1)} MB, max ${maxMb} MB). No more attempts.`)
+      } else {
+        setGuidance(`File too large (${(f.size / (1024 * 1024)).toFixed(1)} MB, max ${maxMb} MB). ${MAX_RETAKES - next} attempt${MAX_RETAKES - next === 1 ? '' : 's'} left.`)
+      }
+      return
+    }
     setCapturedFile(f)
     setCapturedUrl(URL.createObjectURL(f))
     setPhase('captured')
-  }, [])
+  }, [maxMb, retakeCount])
 
   if (phase === 'submitted') return null
 
@@ -909,6 +963,17 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
                 </button>
               : <span className="camera-confirm-retake-exhausted">No more retakes</span>
             }
+            <a
+              className="camera-confirm-retake camera-download-link"
+              href={capturedUrl!}
+              download={isIdCapture ? 'id_capture.jpg' : 'capture.jpg'}
+              aria-label="Download photo"
+            >
+              <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16">
+                <path d="M10 3a.75.75 0 0 1 .75.75v7.19l2.47-2.47a.75.75 0 1 1 1.06 1.06l-3.75 3.75a.75.75 0 0 1-1.06 0L5.72 9.53a.75.75 0 0 1 1.06-1.06l2.47 2.47V3.75A.75.75 0 0 1 10 3ZM3.75 15a.75.75 0 0 0 0 1.5h12.5a.75.75 0 0 0 0-1.5H3.75Z"/>
+              </svg>
+              Save
+            </a>
             <button className="camera-confirm-use" onClick={usePhoto}>Use This</button>
           </div>
         </>
@@ -916,17 +981,23 @@ function CaptureInput({ node, onAnswer, disabled }: Props) {
 
       {phase === 'fallback' && (
         <div className="camera-fallback">
-          <p>Camera unavailable, please choose a file.</p>
+          {guidance
+            ? <p style={{ color: 'var(--k-rose)', margin: '0 0 12px', fontSize: '0.9rem' }}>{guidance}</p>
+            : <p>Camera unavailable, please choose a file.</p>
+          }
           <input
             ref={fileRef}
             type="file"
             accept={accepted}
             onChange={onFileChange}
             style={{ display: 'none' }}
+            disabled={retakeCount >= MAX_RETAKES}
           />
-          <button className="k-primary-btn" onClick={() => fileRef.current?.click()}>
-            Choose File
-          </button>
+          {retakeCount < MAX_RETAKES && (
+            <button className="k-primary-btn" onClick={() => fileRef.current?.click()}>
+              Choose File
+            </button>
+          )}
         </div>
       )}
     </div>
