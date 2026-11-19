@@ -49,19 +49,24 @@
 }
 
 .env-selector {
-  background: rgba(255,255,255,.08);
+  appearance: none;
+  background: rgba(255,255,255,.08) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23A8A29E'/%3E%3C/svg%3E") no-repeat right 8px center;
   border: 1px solid rgba(255,255,255,.15);
   color: #E7E2DB;
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.04em;
-  padding: 3px 8px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 4px 28px 4px 10px;
   border-radius: 6px;
   cursor: pointer;
   outline: none;
+  height: 28px;
+  line-height: 1;
 }
-.env-selector:hover { background: rgba(255,255,255,.13); }
-.env-selector option { background: #1C1917; color: #E7E2DB; }
+.env-selector:hover { background-color: rgba(255,255,255,.13); }
+.env-selector:focus { border-color: rgba(255,255,255,.3); }
+.env-selector option { background: #1C1917; color: #E7E2DB; text-transform: none; }
 
 .banner-env {
   display: inline-flex;

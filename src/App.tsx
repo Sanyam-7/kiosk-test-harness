@@ -36,7 +36,6 @@ export default function App() {
               <option key={key} value={key}>{ENV_CONFIGS[key].label}</option>
             ))}
           </select>
-          <span className="banner-env">{ENV_CONFIGS[activeEnv].apiBase}</span>
         </div>
         <nav>
           <button className={tab === 'kiosk' ? 'active' : ''} onClick={() => setTab('kiosk')}>
