@@ -1,4 +1,4 @@
-import { ADMIN_API_BASE, CONV_API_BASE, CONV_API_PATH } from './config'
+import { getActiveApiBase, CONV_API_PATH } from './config'
 import type { SessionEnvelope, ApiChannel, RequestLog } from './types'
 import { storage } from './storage'
 
@@ -86,7 +86,7 @@ async function request<T>(
 export function startFlow(flowId: string, apiKey: string, opts: {
   language?: string; end_user_id?: string; context_variables?: Record<string, string>
 } = {}) {
-  return request<SessionEnvelope>('POST', `${CONV_API_BASE}${CONV_API_PATH}/flow/${flowId}/start`, {
+  return request<SessionEnvelope>('POST', `${getActiveApiBase()}${CONV_API_PATH}/flow/${flowId}/start`, {
     auth: { type: 'apikey', key: apiKey },
     body: { language: opts.language || 'en', ...opts },
   })
@@ -95,7 +95,7 @@ export function startFlow(flowId: string, apiKey: string, opts: {
 export function sendMessage(sessionId: string, apiKey: string, input: {
   type: 'text' | 'option' | 'event'; value?: string; option_id?: string; event?: string
 }, idempotencyKey: string) {
-  return request<SessionEnvelope>('POST', `${CONV_API_BASE}${CONV_API_PATH}/flow-session/${sessionId}/messages`, {
+  return request<SessionEnvelope>('POST', `${getActiveApiBase()}${CONV_API_PATH}/flow-session/${sessionId}/messages`, {
     auth: { type: 'apikey', key: apiKey },
     idempotencyKey,
     body: { input },
@@ -105,7 +105,7 @@ export function sendMessage(sessionId: string, apiKey: string, input: {
 export function uploadFile(sessionId: string, apiKey: string, file: File, idempotencyKey: string) {
   const fd = new FormData()
   fd.append('file', file)
-  return request<SessionEnvelope>('POST', `${CONV_API_BASE}${CONV_API_PATH}/flow-session/${sessionId}/messages`, {
+  return request<SessionEnvelope>('POST', `${getActiveApiBase()}${CONV_API_PATH}/flow-session/${sessionId}/messages`, {
     auth: { type: 'apikey', key: apiKey },
     idempotencyKey,
     formData: fd,
@@ -113,13 +113,13 @@ export function uploadFile(sessionId: string, apiKey: string, file: File, idempo
 }
 
 export function getSession(sessionId: string, apiKey: string) {
-  return request<SessionEnvelope>('GET', `${CONV_API_BASE}${CONV_API_PATH}/flow-session/${sessionId}`, {
+  return request<SessionEnvelope>('GET', `${getActiveApiBase()}${CONV_API_PATH}/flow-session/${sessionId}`, {
     auth: { type: 'apikey', key: apiKey },
   })
 }
 
 export function deleteSession(sessionId: string, apiKey: string) {
-  return request<void>('DELETE', `${CONV_API_BASE}${CONV_API_PATH}/flow-session/${sessionId}`, {
+  return request<void>('DELETE', `${getActiveApiBase()}${CONV_API_PATH}/flow-session/${sessionId}`, {
     auth: { type: 'apikey', key: apiKey },
   })
 }
@@ -128,13 +128,13 @@ export function deleteSession(sessionId: string, apiKey: string) {
 
 export function listChannels(apiKey: string, flowId?: string) {
   const q = flowId ? `?flow_id=${flowId}` : ''
-  return request<{ channels: ApiChannel[] }>('GET', `${ADMIN_API_BASE}/v2/guided-conv/admin/api-channels${q}`, {
+  return request<{ channels: ApiChannel[] }>('GET', `${getActiveApiBase()}/v2/guided-conv/admin/api-channels${q}`, {
     auth: { type: 'apikey', key: apiKey },
   })
 }
 
 export function createChannel(apiKey: string, flowId: string) {
-  return request<ApiChannel>('POST', `${ADMIN_API_BASE}/v2/guided-conv/admin/api-channels`, {
+  return request<ApiChannel>('POST', `${getActiveApiBase()}/v2/guided-conv/admin/api-channels`, {
     auth: { type: 'apikey', key: apiKey },
     body: { flow_id: flowId },
   })

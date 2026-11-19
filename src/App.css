@@ -48,6 +48,21 @@
   letter-spacing: -0.01em;
 }
 
+.env-selector {
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.15);
+  color: #E7E2DB;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  outline: none;
+}
+.env-selector:hover { background: rgba(255,255,255,.13); }
+.env-selector option { background: #1C1917; color: #E7E2DB; }
+
 .banner-env {
   display: inline-flex;
   align-items: center;
