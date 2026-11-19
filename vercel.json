@@ -1,5 +1,9 @@
 {
   "rewrites": [
-    { "source": "/proxy/:path*", "destination": "https://qa-api.txtbox.in/:path*" }
+    { "source": "/proxy/qa/:path*",      "destination": "https://qa-api.txtbox.in/:path*" },
+    { "source": "/proxy/staging/:path*", "destination": "https://api.txtbox.in/:path*" },
+    { "source": "/proxy/aus/:path*",     "destination": "https://aus-api.sms-magic.com/:path*" },
+    { "source": "/proxy/eu/:path*",      "destination": "https://eu.api.sms-magic.com/:path*" },
+    { "source": "/proxy/us/:path*",      "destination": "https://api.sms-magic.com/:path*" }
   ]
 }

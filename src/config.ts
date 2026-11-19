@@ -19,7 +19,8 @@ export function getActiveEnv(): EnvKey {
 }
 
 export function getActiveApiBase(): string {
-  return ENV_CONFIGS[getActiveEnv()].apiBase
+  const env = getActiveEnv()
+  return import.meta.env.PROD ? `/proxy/${env}` : ENV_CONFIGS[env].apiBase
 }
 
 // Legacy exports for existing code that imports these directly
